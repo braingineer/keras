@@ -942,7 +942,6 @@ class InputLayer(Layer):
 
         self.batch_input_shape = batch_input_shape
         self.input_dtype = input_dtype
-
         input_tensor = K.placeholder(shape=batch_input_shape,
                                      dtype=input_dtype,
                                      name=self.name)

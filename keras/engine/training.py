@@ -578,6 +578,7 @@ class Model(Container):
             y_true = self.targets[i]
             y_pred = self.outputs[i]
             output_metrics = nested_metrics[i]
+            mask = masks[i]
 
             for metric in output_metrics:
                 if metric == 'accuracy' or metric == 'acc':
@@ -585,17 +586,17 @@ class Model(Container):
                     output_shape = self.internal_output_shapes[i]
                     if output_shape[-1] == 1:
                         # case: binary accuracy
-                        self.metrics.append(metrics_module.binary_accuracy(y_true, y_pred))
+                        self.metrics.append(metrics_module.binary_accuracy(y_true, y_pred, mask))
                     else:
                         # case: categorical accuracy
-                        self.metrics.append(metrics_module.categorical_accuracy(y_true, y_pred))
+                        self.metrics.append(metrics_module.categorical_accuracy(y_true, y_pred, mask))
                     if len(self.output_names) == 1:
                         self.metrics_names.append('acc')
                     else:
                         self.metrics_names.append(self.output_layers[i].name + '_acc')
                 else:
                     metric_fn = metrics_module.get(metric)
-                    self.metrics.append(metric_fn(y_true, y_pred))
+                    self.metrics.append(metric_fn(y_true, y_pred, mask))
                     if len(self.output_names) == 1:
                         self.metrics_names.append(metric_fn.__name__)
                     else:
@@ -705,7 +706,7 @@ class Model(Container):
 
         self.history = cbks.History()
         callbacks = [cbks.BaseLogger()] + callbacks + [self.history]
-        if verbose:
+        if verbose and all([not isinstance(cbk, ProgbarLogger) for cbk in callbacks]):
             callbacks += [cbks.ProgbarLogger()]
         callbacks = cbks.CallbackList(callbacks)
 
@@ -1256,7 +1257,7 @@ class Model(Container):
         # prepare callbacks
         self.history = cbks.History()
         callbacks = [cbks.BaseLogger()] + callbacks + [self.history]
-        if verbose:
+        if verbose and all([not isinstance(cb, cbks.ProgbarLogger) for cb in callbacks]):
             callbacks += [cbks.ProgbarLogger()]
         callbacks = cbks.CallbackList(callbacks)
 
@@ -1323,6 +1324,7 @@ class Model(Container):
                     batch_size = len(x[0])
                 else:
                     batch_size = len(x)
+
                 batch_logs['batch'] = batch_index
                 batch_logs['size'] = batch_size
                 callbacks.on_batch_begin(batch_index, batch_logs)
