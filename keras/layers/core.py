@@ -978,6 +978,7 @@ class TimeDistributedDense(Layer):
                  input_dim=None, input_length=None, **kwargs):
         warnings.warn('TimeDistributedDense is deprecated, '
                       'please use TimeDistributed(Dense(...)) instead.')
+        
         self.output_dim = output_dim
         self.init = initializations.get(init)
         self.activation = activations.get(activation)

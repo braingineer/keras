@@ -367,7 +367,7 @@ def standardize_weights(y, sample_weight=None, class_weight=None,
 
 
 def generator_queue(generator, max_q_size=10,
-                    wait_time=0.05, nb_worker=1):
+                    wait_time=0.05, nb_worker=1, **kwargs):
     '''Builds a threading queue out of a data generator.
     Used in `fit_generator`, `evaluate_generator`.
     '''
@@ -578,6 +578,7 @@ class Model(Container):
             y_true = self.targets[i]
             y_pred = self.outputs[i]
             output_metrics = nested_metrics[i]
+            mask = masks[i]
 
             for metric in output_metrics:
                 if metric == 'accuracy' or metric == 'acc':
@@ -585,17 +586,17 @@ class Model(Container):
                     output_shape = self.internal_output_shapes[i]
                     if output_shape[-1] == 1:
                         # case: binary accuracy
-                        self.metrics.append(metrics_module.binary_accuracy(y_true, y_pred))
+                        self.metrics.append(metrics_module.binary_accuracy(y_true, y_pred, mask))
                     else:
                         # case: categorical accuracy
-                        self.metrics.append(metrics_module.categorical_accuracy(y_true, y_pred))
+                        self.metrics.append(metrics_module.categorical_accuracy(y_true, y_pred, mask))
                     if len(self.output_names) == 1:
                         self.metrics_names.append('acc')
                     else:
                         self.metrics_names.append(self.output_layers[i].name + '_acc')
                 else:
                     metric_fn = metrics_module.get(metric)
-                    self.metrics.append(metric_fn(y_true, y_pred))
+                    self.metrics.append(metric_fn(y_true, y_pred, mask))
                     if len(self.output_names) == 1:
                         self.metrics_names.append(metric_fn.__name__)
                     else:
@@ -704,7 +705,7 @@ class Model(Container):
 
         self.history = cbks.History()
         callbacks = [cbks.BaseLogger()] + callbacks + [self.history]
-        if verbose:
+        if verbose and all([not isinstance(cbk, ProgbarLogger) for cbk in callbacks]):
             callbacks += [cbks.ProgbarLogger()]
         callbacks = cbks.CallbackList(callbacks)
 
@@ -1190,7 +1191,7 @@ class Model(Container):
     def fit_generator(self, generator, samples_per_epoch, nb_epoch,
                       verbose=1, callbacks=[],
                       validation_data=None, nb_val_samples=None,
-                      class_weight={}):
+                      class_weight={}, generator_kwargs=None):
         '''Fits the model on data generated batch-by-batch by
         a Python generator.
         The generator is run in parallel to the model, for efficiency.
@@ -1243,6 +1244,7 @@ class Model(Container):
         '''
         wait_time = 0.01  # in seconds
         epoch = 0
+        generator_kwargs = generator_kwargs or {}
 
         do_validation = bool(validation_data)
         self._make_train_function()
@@ -1263,7 +1265,7 @@ class Model(Container):
         # prepare callbacks
         self.history = cbks.History()
         callbacks = [cbks.BaseLogger()] + callbacks + [self.history]
-        if verbose:
+        if verbose and all([not isinstance(cb, cbks.ProgbarLogger) for cb in callbacks]):
             callbacks += [cbks.ProgbarLogger()]
         callbacks = cbks.CallbackList(callbacks)
 
@@ -1298,7 +1300,7 @@ class Model(Container):
             self.validation_data = None
 
         # start generator thread storing batches into a queue
-        data_gen_queue, _stop = generator_queue(generator)
+        data_gen_queue, _stop = generator_queue(generator, **generator_kwargs)
 
         callback_model.stop_training = False
         while epoch < nb_epoch:
@@ -1337,6 +1339,7 @@ class Model(Container):
                     batch_size = len(list(x.values())[0])
                 else:
                     batch_size = len(x)
+
                 batch_logs['batch'] = batch_index
                 batch_logs['size'] = batch_size
                 callbacks.on_batch_begin(batch_index, batch_logs)
