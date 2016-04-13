@@ -98,7 +98,6 @@ class TimeDistributed(Wrapper):
                                 'argument, including the time axis.')
         child_input_shape = (input_shape[0],) + input_shape[2:]
         self.layer.build(child_input_shape)
-        self.supports_masking = True
         super(TimeDistributed, self).build()
 
     def get_output_shape_for(self, input_shape):

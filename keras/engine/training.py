@@ -367,7 +367,7 @@ def standardize_weights(y, sample_weight=None, class_weight=None,
 
 
 def generator_queue(generator, max_q_size=10,
-                    wait_time=0.05, nb_worker=1):
+                    wait_time=0.05, nb_worker=1, **kwargs):
     '''Builds a threading queue out of a data generator.
     Used in `fit_generator`, `evaluate_generator`.
     '''
@@ -1185,7 +1185,7 @@ class Model(Container):
     def fit_generator(self, generator, samples_per_epoch, nb_epoch,
                       verbose=1, callbacks=[],
                       validation_data=None, nb_val_samples=None,
-                      class_weight={}):
+                      class_weight={}, generator_kwargs=None):
         '''Fits the model on data generated batch-by-batch by
         a Python generator.
         The generator is run in parallel to the model, for efficiency.
@@ -1238,6 +1238,7 @@ class Model(Container):
         '''
         wait_time = 0.01  # in seconds
         epoch = 0
+        generator_kwargs = generator_kwargs or {}
 
         do_validation = bool(validation_data)
         self._make_train_function()
@@ -1288,7 +1289,7 @@ class Model(Container):
             self.validation_data = None
 
         # start generator thread storing batches into a queue
-        data_gen_queue, _stop = generator_queue(generator)
+        data_gen_queue, _stop = generator_queue(generator, **generator_kwargs)
 
         self.stop_training = False
         while epoch < nb_epoch:
