@@ -337,6 +337,7 @@ class RepeatVector(Layer):
     '''
     def __init__(self, n, **kwargs):
         self.n = n
+        self.supports_masking = True
         self.input_spec = [InputSpec(ndim=2)]
         super(RepeatVector, self).__init__(**kwargs)
 
@@ -345,6 +346,11 @@ class RepeatVector(Layer):
 
     def call(self, x, mask=None):
         return K.repeat(x, self.n)
+
+    def compute_mask(self, x, mask=None):
+        if mask is None:
+            return None
+        return K.repeat(mask, self.n)
 
     def get_config(self):
         config = {'n': self.n}

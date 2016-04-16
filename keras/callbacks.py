@@ -195,6 +195,37 @@ class ProgbarLogger(Callback):
             self.progbar.update(self.seen, self.log_values)
 
 
+
+class ProgbarV2(ProgbarLogger):
+    '''Callback that prints metrics to stdout.
+    '''
+    def __init__(self, update_frequency=1, progbar_width=30):
+        self.update_frequency = update_frequency
+        self.progbar_width = progbar_width
+        
+    def on_epoch_begin(self, epoch, logs={}):
+        if self.verbose:
+            print('Epoch %d/%d' % (epoch + 1, self.nb_epoch))
+            self.progbar = Progbar(target=self.params['nb_sample'],
+                                   verbose=self.verbose,
+                                   width=self.progbar_width)
+        self.seen = 0
+
+    def on_batch_end(self, batch, logs={}):
+        batch_size = logs.get('size', 0)
+        self.seen += batch_size
+
+        for k in self.params['metrics']:
+            if k in logs:
+                self.log_values.append((k, logs[k]))
+
+        # skip progbar update for the last batch;
+        # will be handled by on_epoch_end
+        if (self.verbose and self.seen < self.params['nb_sample'] and 
+                             (self.seen // batch_size) % self.update_frequency == 0):
+            self.progbar.update(self.seen, self.log_values)
+
+
 class History(Callback):
     '''Callback that records events
     into a `History` object.
