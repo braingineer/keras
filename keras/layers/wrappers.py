@@ -83,6 +83,8 @@ class TimeDistributed(Wrapper):
         super(TimeDistributed, self).__init__(layer, **kwargs)
 
     def build(self, input_shape):
+        import pdb
+        #pdb.set_trace()
         assert len(input_shape) >= 3
         self.input_spec = [InputSpec(shape=input_shape)]
         if K._BACKEND == 'tensorflow':
@@ -100,6 +102,22 @@ class TimeDistributed(Wrapper):
         self.layer.build(child_input_shape)
         super(TimeDistributed, self).build()
 
+    def compute_mask(self, x, mask=None):
+        if mask is None:
+            return None
+        input_shape = self.input_spec[0].shape
+        child_input_shape = (input_shape[0],) + input_shape[2:]
+        output_shape = self.get_output_shape_for(input_shape)
+        if len(input_shape) > len(output_shape):
+            d = len(input_shape) - len(output_shape) 
+            mask = K.max(mask, axis=tuple([-i for i in range(1,d+1)]))
+        return mask
+
+        if input_shape[0]:
+            def step(mask, states):
+                output = self.layer.compute_mask(mask)
+
+
     def get_output_shape_for(self, input_shape):
         child_input_shape = (input_shape[0],) + input_shape[2:]
         child_output_shape = self.layer.get_output_shape_for(child_input_shape)
@@ -107,6 +125,8 @@ class TimeDistributed(Wrapper):
         return (child_output_shape[0], timesteps) + child_output_shape[1:]
 
     def call(self, X, mask=None):
+        import pdb
+        #pdb.set_trace()
         input_shape = self.input_spec[0].shape
         if input_shape[0]:
             # batch size matters, use rnn-based implementation
@@ -130,3 +150,6 @@ class TimeDistributed(Wrapper):
             output_shape = self.get_output_shape_for(input_shape)
             y = K.reshape(y, (-1, input_length) + output_shape[2:])
         return y
+
+
+Distribute = TimeDistributed

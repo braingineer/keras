@@ -61,10 +61,10 @@ class Embedding(Layer):
     # References
         - [A Theoretically Grounded Application of Dropout in Recurrent Neural Networks](http://arxiv.org/abs/1512.05287)
     '''
-    input_ndim = 2
+    #input_ndim = 2
 
     def __init__(self, input_dim, output_dim,
-                 init='uniform', input_length=None,
+                 init='uniform', 
                  W_regularizer=None, activity_regularizer=None,
                  W_constraint=None,
                  mask_zero=False,
@@ -72,7 +72,7 @@ class Embedding(Layer):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.init = initializations.get(init)
-        self.input_length = input_length
+        #self.input_length = input_length
         self.mask_zero = mask_zero
         self.dropout = dropout
 
@@ -84,7 +84,7 @@ class Embedding(Layer):
         if 0. < self.dropout < 1.:
             self.uses_learning_phase = True
         self.initial_weights = weights
-        kwargs['input_shape'] = (self.input_length,)
+        #kwargs['input_shape'] = (self.input_length,)
         kwargs['input_dtype'] = 'int32'
         super(Embedding, self).__init__(**kwargs)
 
@@ -113,10 +113,10 @@ class Embedding(Layer):
         if not self.mask_zero:
             return None
         else:
-            return K.not_equal(x, 0)
+            return K.expand_dims(K.not_equal(x, 0), -1)
 
     def get_output_shape_for(self, input_shape):
-        return (input_shape[0], self.input_length, self.output_dim)
+        return input_shape + (self.output_dim,)
 
     def call(self, x, mask=None):
         if 0. < self.dropout < 1.:
@@ -133,7 +133,6 @@ class Embedding(Layer):
         config = {'input_dim': self.input_dim,
                   'output_dim': self.output_dim,
                   'init': self.init.__name__,
-                  'input_length': self.input_length,
                   'mask_zero': self.mask_zero,
                   'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
                   'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
