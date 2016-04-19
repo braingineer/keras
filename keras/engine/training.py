@@ -153,7 +153,7 @@ def check_array_lengths(X, Y, W):
         raise Exception('All input arrays (x) should have '
                         'the same number of samples.')
     set_y = set(y_lengths)
-    if len(set_x) != 1:
+    if len(set_y) != 1:
         raise Exception('All target arrays (y) should have '
                         'the same number of samples.')
     set_w = set(w_lengths)
@@ -195,7 +195,7 @@ def check_loss_and_target_compatibility(targets, losses, output_shapes):
                                 'Alternatively, you can use the loss function '
                                 '`sparse_categorical_crossentropy` instead, '
                                 'which does expect integer targets.')
-        if loss.__name__ in key_losses and y.shape[1] != shape[1]:
+        if loss.__name__ in key_losses and shape[1] is not None and y.shape[1] != shape[1]:
                 raise Exception('A target array with shape ' + str(y.shape) +
                                 ' was passed for an output of shape ' + str(shape) +
                                 ' while using as loss `' + loss.__name__ + '`. '
