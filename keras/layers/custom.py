@@ -313,13 +313,17 @@ class Summarize(Layer):
             return None
         target_dim = K.ndim(x) - 2
         num_reducing = K.ndim(mask) - target_dim
-        axes = tuple([-i for i in range(1,num_reducing+1)])
-        return K.max(mask, axes)
+        if num_reducing:
+            axes = tuple([-i for i in range(1,num_reducing+1)])
+            mask = K.max(mask, axes)
+        return mask
 
     def call(self, x, mask=None):
         input_shape = self.input_spec[0].shape
         x = K.reshape(x, (-1,) + input_shape[-2:]) # (batch * d1 * ... * dn-2, dn-1, dn)
-        y = self.layer.call(x)
+        mask_shape = (K.shape(x)[0], -1)
+        mask = K.reshape(mask, mask_shape) # give it the same first dim
+        y = self.layer.call(x, mask)
         output_shape = self.get_output_shape_for(input_shape)
         return K.reshape(y, output_shape)
 

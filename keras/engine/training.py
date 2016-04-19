@@ -31,8 +31,8 @@ def standardize_input_data(data, names, shapes=None, check_batch_dim=True,
         arrays = []
         for name in names:
             if name not in data:
-                raise Exception('No data provided for input "' +
-                                name + '". Input data keys: ' +
+                raise Exception('No data provided for "' +
+                                name + '". Need data for each key in: ' +
                                 str(data.keys()))
             arrays.append(data[name])
     elif type(data) is list:
@@ -224,6 +224,22 @@ def collect_metrics(metrics, output_names):
                         str(metrics))
 
 
+def collect_trainable_weights(layer):
+    trainable = getattr(layer, 'trainable', True)
+    if not trainable:
+        return []
+    weights = []
+    if layer.__class__.__name__ in ['Sequential', 'Model']:
+        for sublayer in layer.layers:
+            weights += collect_trainable_weights(sublayer)
+    elif layer.__class__.__name__ == 'Graph':
+        for sublayer in layer._graph_nodes.values():
+            weights += collect_trainable_weights(sublayer)
+    else:
+        weights += layer.trainable_weights
+    return weights
+
+
 def batch_shuffle(index_array, batch_size):
     '''This shuffles an array in a batch-wise fashion.
     Useful for shuffling HDF5 arrays
@@ -372,7 +388,7 @@ def standardize_weights(y, sample_weight=None, class_weight=None,
 def generator_queue(generator, max_q_size=10,
                     wait_time=0.05, nb_worker=1, **kwargs):
     '''Builds a threading queue out of a data generator.
-    Used in `fit_generator`, `evaluate_generator`.
+    Used in `fit_generator`, `evaluate_generator`, `predict_generator`.
     '''
     q = queue.Queue()
     _stop = threading.Event()
@@ -626,13 +642,10 @@ class Model(Container):
             else:
                 inputs = self.inputs + self.targets + self.sample_weights
 
-            # dedupe trainable weights
-            trainable_weights_set = set()
+            # get trainable weights
             trainable_weights = []
-            for w in self.trainable_weights:
-                if w not in trainable_weights_set:
-                    trainable_weights_set.add(w)
-                    trainable_weights.append(w)
+            for layer in self.layers:
+                trainable_weights += collect_trainable_weights(layer)
 
             training_updates = self.optimizer.get_updates(trainable_weights, self.constraints, self.total_loss)
             updates = self.updates + training_updates
@@ -960,14 +973,6 @@ class Model(Container):
                                                            class_weight=class_weight,
                                                            check_batch_dim=False,
                                                            batch_size=batch_size)
-        # prepare input arrays and training function
-        if self.uses_learning_phase:
-            ins = x + y + sample_weights + [1.]
-        else:
-            ins = x + y + sample_weights
-        self._make_train_function()
-        f = self.train_function
-
         # prepare validation data
         if validation_data:
             do_validation = True
@@ -1005,6 +1010,14 @@ class Model(Container):
             do_validation = False
             val_f = None
             val_ins = None
+
+        # prepare input arrays and training function
+        if self.uses_learning_phase:
+            ins = x + y + sample_weights + [1.]
+        else:
+            ins = x + y + sample_weights
+        self._make_train_function()
+        f = self.train_function
 
         # prepare display labels
         out_labels = self.metrics_names
@@ -1194,7 +1207,7 @@ class Model(Container):
     def fit_generator(self, generator, samples_per_epoch, nb_epoch,
                       verbose=1, callbacks=[],
                       validation_data=None, nb_val_samples=None,
-                      class_weight={}, generator_kwargs=None):
+                      class_weight={}, max_q_size=10):
         '''Fits the model on data generated batch-by-batch by
         a Python generator.
         The generator is run in parallel to the model, for efficiency.
@@ -1224,6 +1237,7 @@ class Model(Container):
                 at the end of every epoch.
             class_weight: dictionary mapping class indices to a weight
                 for the class.
+            max_q_size: maximum size for the generator queue
 
         # Returns
             A `History` object.
@@ -1303,7 +1317,7 @@ class Model(Container):
             self.validation_data = None
 
         # start generator thread storing batches into a queue
-        data_gen_queue, _stop = generator_queue(generator, **generator_kwargs)
+        data_gen_queue, _stop = generator_queue(generator, max_q_size=max_q_size)
 
         callback_model.stop_training = False
         while epoch < nb_epoch:
@@ -1377,7 +1391,8 @@ class Model(Container):
                 if samples_seen >= samples_per_epoch and do_validation:
                     if val_gen:
                         val_outs = self.evaluate_generator(validation_data,
-                                                           nb_val_samples)
+                                                           nb_val_samples,
+                                                           max_q_size=max_q_size)
                     else:
                         # no need for try/except because
                         # data has already been validated
@@ -1399,7 +1414,7 @@ class Model(Container):
         callbacks.on_train_end()
         return self.history
 
-    def evaluate_generator(self, generator, val_samples):
+    def evaluate_generator(self, generator, val_samples, max_q_size=10):
         '''Evaluates the model on a data generator. The generator should
         return the same kind of data as accepted by `test_on_batch`.
 
@@ -1410,6 +1425,7 @@ class Model(Container):
             val_samples:
                 total number of samples to generate from `generator`
                 before returning.
+            max_q_size: maximum size for the generator queue
 
         # Returns
             Scalar test loss (if the model has a single output and no metrics)
@@ -1423,7 +1439,7 @@ class Model(Container):
         wait_time = 0.01
         all_outs = []
         weights = []
-        data_gen_queue, _stop = generator_queue(generator)
+        data_gen_queue, _stop = generator_queue(generator, max_q_size=max_q_size)
 
         while processed_samples < val_samples:
             generator_output = None
@@ -1477,7 +1493,7 @@ class Model(Container):
                                 weights=weights))
             return averages
 
-    def predict_generator(self, generator, val_samples):
+    def predict_generator(self, generator, val_samples, max_q_size=10):
         '''Generates predictions for the input samples from a data generator.
         The generator should return the same kind of data as accepted by
         `predict_on_batch`.
@@ -1486,6 +1502,7 @@ class Model(Container):
             generator: generator yielding batches of input samples.
             val_samples: total number of samples to generate from `generator`
                 before returning.
+            max_q_size: maximum size for the generator queue
 
         # Returns
             Numpy array(s) of predictions.
@@ -1495,7 +1512,7 @@ class Model(Container):
         processed_samples = 0
         wait_time = 0.01
         all_outs = []
-        data_gen_queue, _stop = generator_queue(generator)
+        data_gen_queue, _stop = generator_queue(generator, max_q_size=max_q_size)
 
         while processed_samples < val_samples:
             generator_output = None
