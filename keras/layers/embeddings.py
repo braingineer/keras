@@ -64,15 +64,15 @@ class Embedding(Layer):
     #input_ndim = 2
 
     def __init__(self, input_dim, output_dim,
-                 init='uniform', 
+                 init='uniform', input_length=None,
                  W_regularizer=None, activity_regularizer=None,
                  W_constraint=None,
-                 mask_zero=False,
+                 mask_zero=False, 
                  weights=None, dropout=0., **kwargs):
         self.input_dim = input_dim
         self.output_dim = output_dim
         self.init = initializations.get(init)
-        #self.input_length = input_length
+        self.input_length = input_length
         self.mask_zero = mask_zero
         self.dropout = dropout
 
@@ -116,6 +116,9 @@ class Embedding(Layer):
             return K.not_equal(x, 0)
 
     def get_output_shape_for(self, input_shape):
+        if len(input_shape) > 2: 
+            return input_shape + (self.output_dim,)
+        
         if not self.input_length:
             input_length = input_shape[1]
         else:
