@@ -312,7 +312,7 @@ class Summarize(Layer):
         if mask is None:
             return None
         target_dim = K.ndim(x) - 2
-        num_reducing = K.ndim(mask)
+        num_reducing = K.ndim(mask) - target_dim
         axes = tuple([-i for i in range(1,num_reducing+1)])
         return K.max(mask, axes)
 

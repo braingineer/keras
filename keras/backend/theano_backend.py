@@ -557,6 +557,7 @@ def rnn(step_function, inputs, initial_states,
     inputs = inputs.dimshuffle(axes)
 
     if mask is not None:
+        print("Mask")
         if mask.ndim == ndim-1:
             mask = expand_dims(mask)
         assert mask.ndim == ndim
@@ -574,7 +575,7 @@ def rnn(step_function, inputs, initial_states,
             successive_states = []
             states = initial_states
             for i in indices:
-                output, new_states = step_function(inputs[i], states)
+                output, new_states = step_function(inputs[i], states + constants)
 
                 if len(successive_outputs) == 0:
                     prev_output = zeros_like(output)
@@ -624,6 +625,7 @@ def rnn(step_function, inputs, initial_states,
                 outputs = results
                 states = []
     else:
+        print("No mask")
         if unroll:
             indices = list(range(input_length))
             if go_backwards:
@@ -633,7 +635,7 @@ def rnn(step_function, inputs, initial_states,
             successive_states = []
             states = initial_states
             for i in indices:
-                output, states = step_function(inputs[i], states)
+                output, states = step_function(inputs[i], states + constants)
                 successive_outputs.append(output)
                 successive_states.append(states)
             outputs = T.stack(*successive_outputs)

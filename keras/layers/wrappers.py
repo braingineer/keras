@@ -102,7 +102,8 @@ class TimeDistributed(Wrapper):
         self.layer.build(child_input_shape)
         super(TimeDistributed, self).build()
 
-    def compute_mask(self, x, mask=None):
+    def compute_smask(self, x, mask=None):
+        
         if mask is None:
             return None
         input_shape = self.input_spec[0].shape
@@ -131,7 +132,7 @@ class TimeDistributed(Wrapper):
         if input_shape[0]:
             # batch size matters, use rnn-based implementation
             def step(x, states):
-                output = self.layer.call(x)
+                output = self.layer.call(x, mask)
                 return output, []
 
             last_output, outputs, states = K.rnn(step, X,
@@ -142,7 +143,7 @@ class TimeDistributed(Wrapper):
             # to process batches of any size
             # we can go with reshape-based implementation for performance
             X = K.reshape(X, (-1, ) + input_shape[2:])  # (nb_samples * timesteps, ...)
-            y = self.layer.call(X)  # (nb_samples * timesteps, ...)
+            y = self.layer.call(X, mask)  # (nb_samples * timesteps, ...)
             input_length = input_shape[1]
             if not input_length:
                 input_length = K.shape(X)[1]
