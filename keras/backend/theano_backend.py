@@ -476,6 +476,11 @@ def set_value(x, value):
     x.set_value(np.asarray(value, dtype=x.dtype))
 
 
+def batch_set_value(tuples):
+    for x, value in tuples:
+        x.set_value(np.asarray(value, dtype=x.dtype))
+
+
 # GRAPH MANIPULATION
 
 class Function(object):
@@ -560,6 +565,7 @@ def rnn(step_function, inputs, initial_states,
         constants = []
 
     if mask is not None:
+        print("Mask")
         if mask.ndim == ndim-1:
             mask = expand_dims(mask)
         assert mask.ndim == ndim
@@ -624,6 +630,7 @@ def rnn(step_function, inputs, initial_states,
                 outputs = results
                 states = []
     else:
+        print("No mask")
         if unroll:
             indices = list(range(input_length))
             if go_backwards:
