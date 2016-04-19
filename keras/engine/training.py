@@ -1261,7 +1261,6 @@ class Model(Container):
         '''
         wait_time = 0.01  # in seconds
         epoch = 0
-        generator_kwargs = generator_kwargs or {}
 
         do_validation = bool(validation_data)
         self._make_train_function()
