@@ -319,7 +319,7 @@ class Summarize(Layer):
     def call(self, x, mask=None):
         input_shape = self.input_spec[0].shape
         x = K.reshape(x, (-1,) + input_shape[-2:]) # (batch * d1 * ... * dn-2, dn-1, dn)
-        y = self.layer.call(x)
+        y = self.layer.call(x, mask)
         output_shape = self.get_output_shape_for(input_shape)
         return K.reshape(y, output_shape)
 
