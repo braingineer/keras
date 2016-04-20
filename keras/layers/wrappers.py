@@ -102,6 +102,7 @@ class TimeDistributed(Wrapper):
         child_input_shape = (input_shape[0],) + input_shape[2:]
         if not self.layer.built:
             self.layer.build(child_input_shape)
+            self.layer.built = True
         super(TimeDistributed, self).build()
 
     def compute_smask(self, x, mask=None):
