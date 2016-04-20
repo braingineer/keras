@@ -561,15 +561,14 @@ def rnn(step_function, inputs, initial_states,
     axes = [1, 0] + list(range(2, ndim))
     inputs = inputs.dimshuffle(axes)
 
+    if constants is None:
+        constants = []
+
     if mask is not None:
-        print("Mask")
         if mask.ndim == ndim-1:
             mask = expand_dims(mask)
         assert mask.ndim == ndim
         mask = mask.dimshuffle(axes)
-
-        if constants is None:
-            constants = []
 
         if unroll:
             indices = list(range(input_length))
@@ -630,7 +629,6 @@ def rnn(step_function, inputs, initial_states,
                 outputs = results
                 states = []
     else:
-        print("No mask")
         if unroll:
             indices = list(range(input_length))
             if go_backwards:

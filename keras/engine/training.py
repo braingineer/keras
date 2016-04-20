@@ -721,7 +721,7 @@ class Model(Container):
 
         self.history = cbks.History()
         callbacks = [cbks.BaseLogger()] + callbacks + [self.history]
-        if verbose and all([not isinstance(cbk, ProgbarLogger) for cbk in callbacks]):
+        if verbose and all([not isinstance(cbk, cbks.ProgbarLogger) for cbk in callbacks]):
             callbacks += [cbks.ProgbarLogger()]
         callbacks = cbks.CallbackList(callbacks)
 
@@ -1261,7 +1261,6 @@ class Model(Container):
         '''
         wait_time = 0.01  # in seconds
         epoch = 0
-        generator_kwargs = generator_kwargs or {}
 
         do_validation = bool(validation_data)
         self._make_train_function()

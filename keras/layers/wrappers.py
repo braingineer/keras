@@ -99,25 +99,18 @@ class TimeDistributed(Wrapper):
                                 'an "input_shape" or "batch_input_shape" '
                                 'argument, including the time axis.')
         child_input_shape = (input_shape[0],) + input_shape[2:]
-        self.layer.build(child_input_shape)
+        if not self.layer.built:
+            self.layer.build(child_input_shape)
         super(TimeDistributed, self).build()
 
     def compute_smask(self, x, mask=None):
-        
         if mask is None:
             return None
-        input_shape = self.input_spec[0].shape
-        child_input_shape = (input_shape[0],) + input_shape[2:]
-        output_shape = self.get_output_shape_for(input_shape)
-        if len(input_shape) > len(output_shape):
-            d = len(input_shape) - len(output_shape) 
-            mask = K.max(mask, axis=tuple([-i for i in range(1,d+1)]))
-        return mask
 
-        if input_shape[0]:
-            def step(mask, states):
-                output = self.layer.compute_mask(mask)
+        def step(x, states):
+            self.layer.compute_mask(x)
 
+        _, mask, _ = K.rnn(step, mask)
 
     def get_output_shape_for(self, input_shape):
         child_input_shape = (input_shape[0],) + input_shape[2:]
@@ -132,7 +125,7 @@ class TimeDistributed(Wrapper):
         if input_shape[0]:
             # batch size matters, use rnn-based implementation
             def step(x, states):
-                output = self.layer.call(x, mask)
+                output = self.layer.call(x)
                 return output, []
 
             last_output, outputs, states = K.rnn(step, X,
@@ -143,7 +136,7 @@ class TimeDistributed(Wrapper):
             # to process batches of any size
             # we can go with reshape-based implementation for performance
             X = K.reshape(X, (-1, ) + input_shape[2:])  # (nb_samples * timesteps, ...)
-            y = self.layer.call(X, mask)  # (nb_samples * timesteps, ...)
+            y = self.layer.call(X)  # (nb_samples * timesteps, ...)
             input_length = input_shape[1]
             if not input_length:
                 input_length = K.shape(X)[1]

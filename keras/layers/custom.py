@@ -41,8 +41,6 @@ class ProbabilityTensor(Layer):
     def squash_mask(self, mask):
         if K.ndim(mask) == 2:
             return mask
-            #import pdb
-            #pdb.set_trace()
         elif K.ndim(mask) == 3:
             mask = K.max(mask, axis=-1)
         elif K.ndim(mask) > 3:
