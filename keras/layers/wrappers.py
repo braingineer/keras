@@ -6,6 +6,7 @@ class Wrapper(Layer):
 
     def __init__(self, layer, **kwargs):
         self.layer = layer
+        self.uses_learning_phase = layer.uses_learning_phase
         super(Wrapper, self).__init__(**kwargs)
 
     def build(self, input_shape=None):
@@ -119,16 +120,14 @@ class TimeDistributed(Wrapper):
         return (child_output_shape[0], timesteps) + child_output_shape[1:]
 
     def call(self, X, mask=None):
-        import pdb
-        #pdb.set_trace()
         input_shape = self.input_spec[0].shape
-        if input_shape[0]:
+        if input_shape[0] or mask is not None:
             # batch size matters, use rnn-based implementation
             def step(x, states):
                 output = self.layer.call(x)
                 return output, []
 
-            last_output, outputs, states = K.rnn(step, X,
+            last_output, outputs, states = K.rnn(step, X, mask=mask,
                                                  initial_states=[])
             y = outputs
         else:
@@ -140,6 +139,8 @@ class TimeDistributed(Wrapper):
             input_length = input_shape[1]
             if not input_length:
                 input_length = K.shape(X)[1]
+            X = K.reshape(X, (-1, ) + input_shape[2:])  # (nb_samples * timesteps, ...)
+            y = self.layer.call(X)  # (nb_samples * timesteps, ...)
             # (nb_samples, timesteps, ...)
             output_shape = self.get_output_shape_for(input_shape)
             y = K.reshape(y, (-1, input_length) + output_shape[2:])
