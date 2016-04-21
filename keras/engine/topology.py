@@ -973,7 +973,7 @@ class InputLayer(Layer):
 
 
 def Input(shape=None, batch_shape=None,
-          name=None, dtype=K.floatx()):
+          name=None, dtype=K.floatx(), ret_both=False):
     '''`Input()` is used to instantiate a Keras tensor.
     A Keras tensor is a tensor object from the underlying backend
     (Theano or TensorFlow), which we augment with certain
@@ -1027,10 +1027,11 @@ def Input(shape=None, batch_shape=None,
     # note that in this case train_output and test_output are the same pointer.
     outputs = input_layer.inbound_nodes[0].output_tensors
     if len(outputs) == 1:
-        return outputs[0]
+        outputs = outputs[0]
+    if ret_both:
+        return outputs, input_layer
     else:
         return outputs
-
 
 class Merge(Layer):
     '''A `Merge` layer can be used to merge a list of tensors
@@ -1074,7 +1075,7 @@ class Merge(Layer):
             (in case some input layer node returns multiple tensors).
     '''
     def __init__(self, layers=None, mode='sum', concat_axis=-1,
-                 dot_axes=-1, output_shape=None,
+                 dot_axes=-1, output_shape=None, output_mask=None,
                  node_indices=None, tensor_indices=None, name=None):
         self.layers = layers
         self.mode = mode
@@ -1084,6 +1085,7 @@ class Merge(Layer):
             self.dot_axes = [self.dot_axes, ] * 2
         self._output_shape = output_shape
         self.node_indices = node_indices
+        self._output_mask = output_mask
 
         # layer parameters
         self.inbound_nodes = []
@@ -1092,7 +1094,7 @@ class Merge(Layer):
         self.regularizers = []
         self.trainable_weights = []
         self.non_trainable_weights = []
-        self.supports_masking = False
+        self.supports_masking = True
         self.uses_learning_phase = False
         self.input_spec = None  # compatible with whatever
         if not name:
@@ -1186,6 +1188,12 @@ class Merge(Layer):
         if type(inputs) is not list or len(inputs) <= 1:
             raise Exception('Merge must be called on a list of tensors '
                             '(at least 2). Got: ' + str(inputs))
+
+        # check mask
+        has_mask = mask is not None and any([m is not None for m in mask])
+        if has_mask:
+            assert hasattr(mask, '__len__')
+
         # case: "mode" is a lambda or function.
         if hasattr(self.mode, '__call__'):
             # TODO: consider making it possible to
@@ -1199,6 +1207,12 @@ class Merge(Layer):
                 s += inputs[i]
             if self.mode == 'ave':
                 s /= len(inputs)
+
+            # masking
+            if has_mask:
+                for m in mask:
+                    s *= self._normalize_mask_dims(m, s)
+
             return s
 
         elif self.mode == 'concat':
@@ -1208,12 +1222,19 @@ class Merge(Layer):
             s = inputs[0]
             for i in range(1, len(inputs)):
                 s *= inputs[i]
+
+            # masking
+            if has_mask:
+                for m in mask:
+                    s *= self._normalize_mask_dims(m, s)
+
             return s
 
         elif self.mode == 'dot':
             l1 = inputs[0]
             l2 = inputs[1]
             output = K.batch_dot(l1, l2, self.dot_axes)
+
             return output
 
         elif self.mode == 'cos':
@@ -1313,13 +1334,42 @@ class Merge(Layer):
         elif self.mode == 'cos':
             return (input_shapes[0][0], 1)
 
-    def compute_mask(self, input, mask=None):
-        '''TODO: add mask merging support
-        '''
-        if mask is not None and any(mask):
-            raise Exception('Merge does not support masking, ' +
-                            'but was passed an input mask: ' + str(mask))
-        return None
+    def _normalize_mask_dims(self, mask, input):
+        if mask is None:
+            return K.ones_like(input)
+
+        if K.ndim(mask) == K.ndim(input):
+            return K.cast(mask, K.floatx())
+
+        assert K.ndim(mask) == K.ndim(input) - 1
+        mask = K.expand_dims(mask)
+        mask = K.permute_dimensions(mask, [0, 1] + list(range(2, K.ndim(input))))
+
+        return K.ones_like(input) * K.cast(mask, K.floatx())
+
+    def compute_mask(self, inputs, mask=None):
+        if mask is None or not any([m is not None for m in mask]):
+            return None
+
+        assert hasattr(mask, '__len__')
+        assert len(mask) == len(inputs)
+
+        if self.mode in ['sum', 'mul', 'ave']:
+            normalized = [self._normalize_mask_dims(m, i) for m, i in zip(mask, inputs)]
+            return K.eall(normalized)
+        elif self.mode in ['concat']:
+            normalized = [self._normalize_mask_dims(m, i) for m, i in zip(mask, inputs)]
+            return K.concatenate(normalized, axis=self.concat_axis)
+        elif self.mode in ['cos', 'dot']:
+            return None
+        elif hasattr(self.mode, '__call__'):
+            if hasattr(self._output_mask, '__call__'):
+                normalized = [self._normalize_mask_dims(m, i) for m, i in zip(mask, inputs)]
+                return self._output_mask(normalized)
+            else:
+                return self._output_mask
+        else:
+            raise Exception('Invalid merge mode (should have been caught earlier)')
 
     def get_config(self):
         py3 = sys.version_info[0] == 3
@@ -1383,8 +1433,9 @@ class Merge(Layer):
         return super(Merge, cls).from_config(config)
 
 
+
 def merge(inputs, mode='sum', concat_axis=-1,
-          dot_axes=-1, output_shape=None, name=None):
+          dot_axes=-1, output_shape=None, output_mask=None, name=None):
     '''Functional merge, to apply to Keras tensors (NOT layers).
     Returns a Keras tensor.
 
@@ -1433,6 +1484,7 @@ def merge(inputs, mode='sum', concat_axis=-1,
                             concat_axis=concat_axis,
                             dot_axes=dot_axes,
                             output_shape=output_shape,
+                            output_mask=output_mask,
                             node_indices=node_indices,
                             tensor_indices=tensor_indices,
                             name=name)
@@ -1442,6 +1494,7 @@ def merge(inputs, mode='sum', concat_axis=-1,
                             concat_axis=concat_axis,
                             dot_axes=dot_axes,
                             output_shape=output_shape,
+                            output_mask=output_mask,
                             name=name)
         return merge_layer(inputs)
 

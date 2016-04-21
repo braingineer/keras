@@ -27,8 +27,30 @@ class ProbabilityTensor(Wrapper):
     def __init__(self, dense_function=None, *args, **kwargs):
         self.supports_masking = True
         self.input_spec = [InputSpec(ndim=3)]
-        layer = Distribute(dense_function) or Distribute(Dense(1))
+        layer = Distribute(dense_function) or Distribute(Dense(1, name='ptensor_func'))
         super(ProbabilityTensor, self).__init__(layer, *args, **kwargs)
+
+    def build(self, input_shape):
+        import pdb
+        #pdb.set_trace()
+        assert len(input_shape) == 3
+        self.input_spec = [InputSpec(shape=input_shape)]
+        if K._BACKEND == 'tensorflow':
+            if not input_shape[1]:
+                raise Exception('When using TensorFlow, you should define '
+                                'explicitly the number of timesteps of '
+                                'your sequences.\n'
+                                'If your first layer is an Embedding, '
+                                'make sure to pass it an "input_length" '
+                                'argument. Otherwise, make sure '
+                                'the first layer has '
+                                'an "input_shape" or "batch_input_shape" '
+                                'argument, including the time axis.')
+
+        if not self.layer.built:
+            self.layer.build(input_shape)
+            self.layer.built = True
+        super(ProbabilityTensor, self).build()
 
     def get_output_shape_for(self, input_shape):
         # b,n,f -> b,n 
@@ -42,10 +64,12 @@ class ProbabilityTensor(Wrapper):
         if K.ndim(mask) == 2:
             return mask
         elif K.ndim(mask) == 3:
-            mask = K.max(mask, axis=-1)
-        elif K.ndim(mask) > 3:
-            raise Exception("what?")
-        return mask
+            return K.any(mask, axis=-1)
+        #elif K.ndim(mask) > 3:
+        import pdb
+        pdb.set_trace()
+        raise Exception("what?")
+        #return mask
 
     def compute_mask(self, x, mask=None):
         if mask is None:
@@ -158,34 +182,41 @@ class Mergecast(Layer):
         return dict(list(base_config.items()) + list(config.items()))   
 
 
-class ExplicitMask(Layer):
-    def __init__(self, mask_tensor, mask_value=0., **kwargs):
+class ExplicitMask(Wrapper):
+    def __init__(self, mask_layer, mask_value=0., **kwargs):
         self.supports_masking = True
         self.mask_value = mask_value
-        self.mask_tensor = mask_tensor
-        super(ExplicitMask, self).__init__(**kwargs)
+        super(ExplicitMask, self).__init__(mask_layer, **kwargs)
 
-    def compute_mask(self, input, input_mask=None):
-        mask = K.not_equal(self.mask_tensor, self.mask_value)
-        if K.ndim(input) == K.ndim(self.mask_tensor):
-            return mask
-        elif K.ndim(input) == K.ndim(self.mask_tensor) + 1:
-            return K.expand_dims(mask)
-        else:
-            return None
+    def compute_mask(self, x, input_mask=None):
+        mask_tensor = self.layer.inbound_nodes[0].output_tensors
+        return self.make_mask(mask_tensor, x)
+
+    def make_mask(self, mask_tensor, x):
+        mask = K.not_equal(mask_tensor, self.mask_value)
+        if K.ndim(x) == K.ndim(mask_tensor) + 1:
+            mask = K.expand_dims(mask)
+        elif K.ndim(x) == K.ndim(mask_tensor) - 1:
+            mask = K.any(mask, axis=-1)
+        return mask
 
     def call(self, x, mask=None):
-        boolean_mask = self.compute_mask(x)
-        return x * K.cast(boolean_mask, K.floatx())
+        mask = self.compute_mask(x, mask)
+        return x * K.cast(mask, K.floatx())
 
     def get_config(self):
         config = {'mask_value': self.mask_value}
         base_config = super(ExplicitMask, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
-class LoseMask(Layer):
+class LambdaMask(Layer):
+    def __init__(self, func, *args, **kwargs):
+        self.func = func
+        self.supports_masking = True
+        super(LambdaMask, self).__init__(*args, **kwargs)
+
     def compute_mask(self, x, mask=None):
-        return None
+        return self.func(x, mask)
 
     def call(self, x, mask=None):
         return x
