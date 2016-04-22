@@ -24,8 +24,6 @@ def categorical_accuracy(y_true, y_pred, mask=None):
         return K.mean(K.equal(K.argmax(y_true, axis=-1),
                               K.argmax(y_pred, axis=-1)))
 
-
-
 def perplexity(y_true, y_pred, mask=None):
     if mask is not None:
         y_pred /= K.sum(y_pred, axis=-1, keepdims=True)

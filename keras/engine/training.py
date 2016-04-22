@@ -66,6 +66,12 @@ def standardize_input_data(data, names, shapes=None, check_batch_dim=True,
                             ': data should be a Numpy array, '
                             'or list/dict of Numpy arrays. '
                             'Found: ' + str(data)[:200] + '...')
+        if len(names) != 1:
+            # case: model expects multiple inputs but only received
+            # a single Numpy array
+            raise Exception('The model expects ' + str(len(names)) +
+                            ' input arrays, but only received one array. '
+                            'Found: array with shape ' + str(data.shape))
         arrays = [data]
 
     # make arrays at least 2D
@@ -606,8 +612,12 @@ class Model(Container):
                     if output_shape[-1] == 1:
                         # case: binary accuracy
                         self.metrics.append(metrics_module.binary_accuracy(y_true, y_pred, mask))
+                    elif self.loss_functions[i] == objectives.sparse_categorical_crossentropy:
+                        # case: categorical accuracy with sparse targets
+                        self.metrics.append(
+                            metrics_module.sparse_categorical_accuracy(y_true, y_pred, mask))
                     else:
-                        # case: categorical accuracy
+                        # case: categorical accuracy with dense targets
                         self.metrics.append(metrics_module.categorical_accuracy(y_true, y_pred, mask))
                     if len(self.output_names) == 1:
                         self.metrics_names.append('acc')
