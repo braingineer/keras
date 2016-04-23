@@ -36,6 +36,10 @@ def perplexity(y_true, y_pred, mask=None):
 
 
 
+def sparse_categorical_accuracy(y_true, y_pred):
+    return K.mean(K.equal(K.max(y_true, axis=-1),
+                          K.argmax(y_pred, axis=-1)))
+
 
 
 
