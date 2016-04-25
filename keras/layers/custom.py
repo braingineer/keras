@@ -104,16 +104,12 @@ class SoftAttention(ProbabilityTensor):
         return (input_shape[0], input_shape[2])
 
     def compute_mask(self, x, mask=None):
-        if mask is None:
+        if mask is None or mask.ndim==2:
             return None
-        if mask.ndim==3:
-            mask = K.max(mask, axis=(1,2))
-        elif mask.ndim==2:
-            mask = K.max(mask, axis=(1,))
+        elif mask.ndim==3:
+            mask = K.any(mask, axis=(1,2))
         else:
             raise Exception("Unexpected situation")
-        mask = K.expand_dims(mask, -1)
-        return mask
 
     def call(self, x, mask=None):
         # b,n,f -> b,f via b,n broadcasted
@@ -135,12 +131,13 @@ class Fix(Flatten):
         # now: model.output_shape == (None, 65536)
     ```
     '''
-    def __init__(self, **kwargs):
+    def __init__(self, return_mask=True, **kwargs):
         super(Fix, self).__init__(**kwargs)
         self.supports_masking = True
+        self.return_mask = return_mask
 
     def compute_mask(self, x, mask=None):
-        if mask is None:
+        if mask is None or not self.return_mask:
             return None
         return K.batch_flatten(mask)
 

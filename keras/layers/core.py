@@ -581,7 +581,7 @@ class Dense(Layer):
 
         self.initial_weights = weights
         self.input_spec = [InputSpec(ndim=2)]
-
+        self.supports_masking = True
         if self.input_dim:
             kwargs['input_shape'] = (self.input_dim,)
         super(Dense, self).__init__(**kwargs)
