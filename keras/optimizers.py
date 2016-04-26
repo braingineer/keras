@@ -92,6 +92,7 @@ class Optimizer(object):
         return {"name": self.__class__.__name__}
 
 
+
 class SGD(Optimizer):
     '''Stochastic gradient descent, with support for momentum,
     learning rate decay, and Nesterov momentum.
@@ -140,6 +141,43 @@ class SGD(Optimizer):
                 "decay": float(K.get_value(self.decay)),
                 "nesterov": self.nesterov}
 
+class SARSA_SGD(SGD):
+    '''SARSA update technique for reinforcement learning applications. 
+
+    # Arguments
+    '''
+    def __init__(self, trace_decay=0.9, time_decay=0.9, *args, **kwargs):
+        super(SARSA_SGD, self).__init__(*args, **kwargs)
+        self.trace_decay = trace_decay
+        self.time_decay = time_decay
+        self.e_trace = None
+
+    def get_gradients(self, loss, params):
+        grads = super(SARSA_SGD, self).get_gradients(loss, params)
+        out_grads = []
+            for p,g in zip(params, grads):
+                if p.name == "value_approximation_W":
+                    # lambda * gamma * e
+                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                    self.e_update += g/self.td
+                    g = self.td*self.e_update
+                out_grads.append(g)
+        return out_grads
+
+    def set_td(self, td_tensor):
+        """ gives the optimizer a handle on the Temporal Difference error
+
+        # Arguments
+            td_tensor: keras tensor.  Output from TD calculations. 
+        """
+        self.td = td_tensor
+
+    def get_updates(self, params, constraints, loss):
+        updates = super(SARSA_SGD, self).get_updates(params, constraints, loss)
+        if self.e_trace is not None:
+            updates.append((self.e_trace, self.e_update))
 
 class RMSprop(Optimizer):
     '''RMSProp optimizer.
@@ -187,6 +225,43 @@ class RMSprop(Optimizer):
                 "rho": float(K.get_value(self.rho)),
                 "epsilon": self.epsilon}
 
+class SARSA_RMSprop(Optimizer):
+    '''SARSA update technique for reinforcement learning applications. 
+
+    # Arguments
+    '''
+    def __init__(self, trace_decay=0.9, time_decay=0.9, *args, **kwargs):
+        super(SARSA_RMSprop, self).__init__(*args, **kwargs)
+        self.e_trace = None
+        self.trace_decay = trace_decay
+        self.time_decay = time_decay
+
+    def get_gradients(self, loss, params):
+        grads = super(SARSA_RMSprop, self).get_gradients(loss, params)
+        out_grads = []
+            for p,g in zip(params, grads):
+                if p.name == "value_approximation_W":
+                    # lambda * gamma * e
+                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                    self.e_update += g/self.td
+                    g = self.td*self.e_update
+                out_grads.append(g)
+        return out_grads
+
+    def set_td(self, td_tensor):
+        """ gives the optimizer a handle on the Temporal Difference error
+
+        # Arguments
+            td_tensor: keras tensor.  Output from TD calculations. 
+        """
+        self.td = td_tensor
+
+    def get_updates(self, params, constraints, loss):
+        updates = super(SARSA_RMSprop, self).get_updates(params, constraints, loss)
+        if self.e_trace is not None:
+            updates.append((self.e_trace, self.e_update))
 
 class Adagrad(Optimizer):
     '''Adagrad optimizer.
@@ -335,6 +410,62 @@ class Adam(Optimizer):
                 "beta_1": float(K.get_value(self.beta_1)),
                 "beta_2": float(K.get_value(self.beta_2)),
                 "epsilon": self.epsilon}
+
+class SARSA_Adam(Adam):
+    '''SARSA update technique for reinforcement learning applications. 
+
+    # Arguments
+    '''
+    def __init__(self, trace_decay=0.9, time_decay=0.9, *args, **kwargs):
+        super(SARSA_Adam, self).__init__(*args, **kwargs)
+        self.e_trace = None
+        self.trace_decay = trace_decay
+        self.time_decay = time_decay
+
+    def get_gradients(self, loss, params):
+        grads = super(SARSA_Adam, self).get_gradients(loss, params)
+        out_grads = []
+            for p,g in zip(params, grads):
+                if p.name == "value_approximation_W":
+                    # lambda * gamma * e
+                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                    self.e_update += g/self.td
+                    g = self.td*self.e_update
+                out_grads.append(g)
+        return out_grads
+
+    def set_td(self, td_tensor):
+        """ gives the optimizer a handle on the Temporal Difference error
+
+        # Arguments
+            td_tensor: keras tensor.  Output from TD calculations. 
+        """
+        self.td = td_tensor
+
+    def get_updates(self, params, constraints, loss):
+        updates = super(SARSA_Adam, self).get_updates(params, constraints, loss)
+        if self.e_trace is not None:
+            updates.append((self.e_trace, self.e_update))
+
+class WoLF(SARSA_Adam):
+    def __init__(averaging_rate=0.1, *args, **kwargs):
+        self.average_theta = None
+        self.averaging_rate = averaging_rate
+        super(WoLF, self).__init__(*args, **kwargs)
+
+    def set_pi(self, theta):
+        self.theta = theta
+        self.average_theta = K.variable(np.zeros(K.get_value(theta).shape))
+        
+
+    def get_updates(self, params, constraints, loss):
+        updates = super(WoLF, self).get_updates(params, constraints, loss)
+        if self.average_theta is not None:
+            new_avg_theta = ((1.0-self.averaging_rate)*self.average_theta + 
+                                  self.averaging_rate*self.theta)
+            updates.append((self.average_theta, new_avg_theta))
 
 
 class Adamax(Optimizer):

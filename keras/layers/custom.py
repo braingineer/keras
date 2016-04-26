@@ -22,6 +22,22 @@ def get_shape(x):
 def make_safe(x):
     return K.clip(x, K.common._EPSILON, 1.0 - K.common._EPSILON)
 
+class DenseFork(MaxoutDense):
+    def __init__(self, output_dim, num_forks, *args, **kwargs):
+        if 'nb_features' in kwargs:
+            kwargs.pop('nb_features')
+        super(DenseFork, self).__init__(output_dim, nb_features=num_forks, *args, **kwargs)
+
+    def get_output_shape_for(self, input_shape):
+        assert input_shape and len(input_shape) == 2
+        return (input_shape[0], input_shape[1], self.output_dim)
+
+    def call(self, x, mask=None):
+        # no activation, this layer is only linear.
+        output = K.dot(x, self.W) + self.b
+        return output
+
+
 class ProbabilityTensor(Wrapper):
     """ function for turning 3d tensor to 2d probability matrix """
     def __init__(self, dense_function=None, *args, **kwargs):
@@ -31,8 +47,6 @@ class ProbabilityTensor(Wrapper):
         super(ProbabilityTensor, self).__init__(layer, *args, **kwargs)
 
     def build(self, input_shape):
-        import pdb
-        #pdb.set_trace()
         assert len(input_shape) == 3
         self.input_spec = [InputSpec(shape=input_shape)]
         if K._BACKEND == 'tensorflow':
@@ -50,14 +64,12 @@ class ProbabilityTensor(Wrapper):
         if not self.layer.built:
             self.layer.build(input_shape)
             self.layer.built = True
+            
         super(ProbabilityTensor, self).build()
 
     def get_output_shape_for(self, input_shape):
         # b,n,f -> b,n 
         #       s.t. \sum_n n = 1
-        if isinstance(input_shape, (list,tuple)) and not isinstance(input_shape[0], int):
-            input_shape = input_shape[0]
-
         return (input_shape[0], input_shape[1])
 
     def squash_mask(self, mask):
@@ -65,18 +77,9 @@ class ProbabilityTensor(Wrapper):
             return mask
         elif K.ndim(mask) == 3:
             return K.any(mask, axis=-1)
-        #elif K.ndim(mask) > 3:
-        import pdb
-        pdb.set_trace()
-        raise Exception("what?")
-        #return mask
 
     def compute_mask(self, x, mask=None):
-        if mask is None:
-            return None
-        if isinstance(x, list):
-            return K.not_equal(x[1], 0)
-        return self.squash_mask(mask)
+        return None
 
     def call(self, x, mask=None):
         if isinstance(x, list):
@@ -87,8 +90,6 @@ class ProbabilityTensor(Wrapper):
             mask = self.squash_mask(mask)
             p_matrix = make_safe(p_matrix * mask)
             p_matrix = (p_matrix / K.sum(p_matrix, axis=-1, keepdims=True))*mask
-        if p_matrix.ndim > 2:
-            raise Exception("fuck")
         return p_matrix
 
     def get_config(self):
@@ -142,70 +143,6 @@ class Fix(Flatten):
         return K.batch_flatten(mask)
 
 
-class Mergecast(Layer):
-    def __init__(self, output_shape, input_shapes, *args, **kwargs):
-        self.output_size = output_shape
-        super(Mergecast, self).__init__(*args, **kwargs)
-        self.input_spec = [InputSpec(shape=in_shape) for in_shape in input_shapes]
-
-    def get_output_shape_for(self, input_shapes):
-        base = input_shapes[0][:2]
-        last = sum([x[-1] for x in input_shapes])
-        out = base + (last,)
-        return out
-
-    def compute_mask(self, x, mask=None):
-        return None
-        if mask is None:
-            return None
-        import pdb
-        #pdb.set_trace()
-        out = None
-        for m in mask:
-            #m = K.expand_dims(K.max(m, axis=-1), -1)
-            if out is None:
-                out = m
-            else:
-                out = out * m
-        return out
-
-    def call(self, xs, mask=None):
-        #input_shapes = [spec.shape for spec in self.input_spec]
-        return K.concatenate(xs, axis=-1)
-
-    def get_config(self):
-        config = {}
-        base_config = super(Mergecast, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))   
-
-
-class ExplicitMask(Wrapper):
-    def __init__(self, mask_layer, mask_value=0., **kwargs):
-        self.supports_masking = True
-        self.mask_value = mask_value
-        super(ExplicitMask, self).__init__(mask_layer, **kwargs)
-
-    def compute_mask(self, x, input_mask=None):
-        mask_tensor = self.layer.inbound_nodes[0].output_tensors
-        return self.make_mask(mask_tensor, x)
-
-    def make_mask(self, mask_tensor, x):
-        mask = K.not_equal(mask_tensor, self.mask_value)
-        if K.ndim(x) == K.ndim(mask_tensor) + 1:
-            mask = K.expand_dims(mask)
-        elif K.ndim(x) == K.ndim(mask_tensor) - 1:
-            mask = K.any(mask, axis=-1)
-        return mask
-
-    def call(self, x, mask=None):
-        mask = self.compute_mask(x, mask)
-        return x * K.cast(mask, K.floatx())
-
-    def get_config(self):
-        config = {'mask_value': self.mask_value}
-        base_config = super(ExplicitMask, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
-
 class LambdaMask(Layer):
     def __init__(self, func, *args, **kwargs):
         self.func = func
@@ -217,60 +154,6 @@ class LambdaMask(Layer):
 
     def call(self, x, mask=None):
         return x
-
-class MultiEmbedding(Layer):
-    """ function for embedding with encoding """
-    def __init__(self,  bit_info, mask_zero=False, *args, **kwargs):
-        # bit info => (in_dim, out_dim) for each item
-        ## assert sameness
-        self.output_size = sum([O for I,O in bit_info])
-        self.bit_info = bit_info
-        self.mask_zero = mask_zero
-        self.layers = []
-        for I, O in bit_info:
-            self.layers.append(Embedding(I, O, mask_zero=mask_zero))
-
-        super(MultiEmbedding, self).__init__(*args, **kwargs)
-
-    def build(self, input_shapes):
-        '''Assumes that self.layer is already set.
-        Should be called at the end of .build() in the
-        children classes.
-        '''
-        self.trainable_weights = []
-        self.non_trainable_weights = [] 
-        self.updates = []
-        self.regularizers =  []
-        self.constraints = {}
-        self.input_spec = [InputSpec(shape=I) for I in input_shapes]
-        for layer, shape in zip(self.layers, input_shapes):
-            if not layer.built:
-                layer.build(shape)
-
-        for layer in self.layers:
-            self.trainable_weights +=  getattr(layer, 'trainable_weights', [])
-            self.non_trainable_weights += getattr(layer, 'non_trainable_weights', [])
-            self.updates  += getattr(layer, 'updates', [])
-            self.regularizers  += getattr(layer, 'regularizers', [])
-            self.constraints.update(getattr(layer, 'constraints', {}))
-
-    def get_output_shape_for(self, input_shapes):
-        return input_shapes[0] + (self.output_size,)
-
-    def call(self, x, mask=None):
-        inputs = [F_emb.call(x_i) for F_emb, x_i in zip(self.layers, x)]
-        return K.concatenate(inputs, axis=-1)
-        
-    def compute_mask(self, x, mask=None):
-        if self.mask_zero is False:
-            return None
-        else:
-            return K.not_equal(K.expand_dims(x[0]), 0)
-    
-    def get_config(self):
-        config = {'output_size': self.output_size}
-        base_config = super(MultiEmbedding, self).get_config()
-        return dict(list(base_config.items()) + list(config.items()))
 
 class Summarize(Wrapper):
     #def __init__(self, summary_space_size, *args, **kwargs):
