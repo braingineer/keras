@@ -1,5 +1,5 @@
 from keras import backend as K
-from .core import Dense, Lambda, Reshape, Activation, Flatten
+from .core import Dense, Lambda, Reshape, Activation, Flatten, MaxoutDense
 from .wrappers import Distribute, Wrapper
 from .recurrent import LSTM
 from .embeddings import Embedding
@@ -26,7 +26,7 @@ class DenseFork(MaxoutDense):
     def __init__(self, output_dim, num_forks, *args, **kwargs):
         if 'nb_features' in kwargs:
             kwargs.pop('nb_features')
-        super(DenseFork, self).__init__(output_dim, nb_features=num_forks, *args, **kwargs)
+        super(DenseFork, self).__init__(output_dim, nb_feature=num_forks, *args, **kwargs)
 
     def get_output_shape_for(self, input_shape):
         assert input_shape and len(input_shape) == 2

@@ -155,15 +155,15 @@ class SARSA_SGD(SGD):
     def get_gradients(self, loss, params):
         grads = super(SARSA_SGD, self).get_gradients(loss, params)
         out_grads = []
-            for p,g in zip(params, grads):
-                if p.name == "value_approximation_W":
-                    # lambda * gamma * e
-                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
-                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
-                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
-                    self.e_update += g/self.td
-                    g = self.td*self.e_update
-                out_grads.append(g)
+        for p,g in zip(params, grads):
+            if p.name == "value_approximation_W":
+                # lambda * gamma * e
+                self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                self.e_update += g/self.td
+                g = self.td*self.e_update
+            out_grads.append(g)
         return out_grads
 
     def set_td(self, td_tensor):
@@ -239,15 +239,15 @@ class SARSA_RMSprop(Optimizer):
     def get_gradients(self, loss, params):
         grads = super(SARSA_RMSprop, self).get_gradients(loss, params)
         out_grads = []
-            for p,g in zip(params, grads):
-                if p.name == "value_approximation_W":
-                    # lambda * gamma * e
-                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
-                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
-                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
-                    self.e_update += g/self.td
-                    g = self.td*self.e_update
-                out_grads.append(g)
+        for p,g in zip(params, grads):
+            if p.name == "value_approximation_W":
+                # lambda * gamma * e
+                self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                self.e_update += g/self.td
+                g = self.td*self.e_update
+            out_grads.append(g)
         return out_grads
 
     def set_td(self, td_tensor):
@@ -425,15 +425,15 @@ class SARSA_Adam(Adam):
     def get_gradients(self, loss, params):
         grads = super(SARSA_Adam, self).get_gradients(loss, params)
         out_grads = []
-            for p,g in zip(params, grads):
-                if p.name == "value_approximation_W":
-                    # lambda * gamma * e
-                    self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
-                    self.e_update = self.trace_decay * self.time_decay * self.e_trace
-                    # + dV/dw or dQ/dw ; divide by td to recover it from MSE
-                    self.e_update += g/self.td
-                    g = self.td*self.e_update
-                out_grads.append(g)
+        for p,g in zip(params, grads):
+            if p.name == "value_approximation_W":
+                # lambda * gamma * e
+                self.e_trace = K.variable(np.zeros(K.get_value(p).shape))
+                self.e_update = self.trace_decay * self.time_decay * self.e_trace
+                # + dV/dw or dQ/dw ; divide by td to recover it from MSE
+                self.e_update += g/self.td
+                g = self.td*self.e_update
+            out_grads.append(g)
         return out_grads
 
     def set_td(self, td_tensor):
@@ -450,23 +450,37 @@ class SARSA_Adam(Adam):
             updates.append((self.e_trace, self.e_update))
 
 class WoLF(SARSA_Adam):
-    def __init__(averaging_rate=0.1, *args, **kwargs):
-        self.average_theta = None
-        self.averaging_rate = averaging_rate
+    '''Gradient Win or Lose Fast (GraWoLF) algorithm by Bowling and Veloso
+       This implementation wraps the SARSA_Adam, which means it will use the Adam
+       optimizer for updating parameters, and the SARSA algorithm for managing
+       an eligibility trace for the function approximation of the critic. 
+
+    # Arguments
+        beta: 0 < float < 1.  
+              the averaging rate of the policy parameter vector
+              a higher value means the running average will use a shorter history
+
+    # References:
+        [Simultaneous Adversarial Multi-Robot Learning]()
+    '''
+    def __init__(self, avg_rate=0.1, *args, **kwargs):
+        self.avg_rate = avg_rate
         super(WoLF, self).__init__(*args, **kwargs)
 
-    def set_pi(self, theta):
-        self.theta = theta
-        self.average_theta = K.variable(np.zeros(K.get_value(theta).shape))
+    def set_pi(self, pi):
+        self.pi = pi
         
-
     def get_updates(self, params, constraints, loss):
         updates = super(WoLF, self).get_updates(params, constraints, loss)
-        if self.average_theta is not None:
-            new_avg_theta = ((1.0-self.averaging_rate)*self.average_theta + 
-                                  self.averaging_rate*self.theta)
-            updates.append((self.average_theta, new_avg_theta))
-
+        out_updates = []
+        for param, update in updates:
+            if param.name == "average_pi_W":
+                theta = self.pi.W
+                assert theta.name == "pi_W"
+                update = (1.0-self.avg_rate)*param+self.avg_rate*self.theta
+            out_updates.append((param, update))
+        return out_updates
+    
 
 class Adamax(Optimizer):
     '''Adamax optimizer from Adam paper's Section 7. It is a variant

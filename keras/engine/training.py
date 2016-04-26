@@ -427,7 +427,7 @@ def generator_queue(generator, max_q_size=10,
 class Model(Container):
 
     def compile(self, optimizer, loss, metrics=[], loss_weights=None,
-                sample_weight_mode=None, **kwargs):
+                sample_weight_mode=None, online_outputs=None, **kwargs):
         '''Configures the model for training.
 
         # Arguments
@@ -449,12 +449,22 @@ class Model(Container):
                 If the model has multiple outputs, you can use a different
                 `sample_weight_mode` on each output by passing a
                 dictionary or a list of modes.
+            online_outputs: a list of outputs to be returned
+                This only works in conjunction with the fit_on_batch currently.
+                Will output values that can be used actionably between batches.
             kwargs: when using the Theano backend, these arguments
                 are passed into K.function. Ignored for Tensorflow backend.
         '''
         self.optimizer = optimizers.get(optimizer)
         self.sample_weight_mode = sample_weight_mode
         self.loss = loss
+
+        # safely set online outputs
+        if online_outputs is None:
+            online_outputs = []
+        elif not isinstance(online_outputs, list):
+            online_outputs=[online_outputs]
+        self.online_outputs = online_outputs
 
         # prepare loss weights
         if loss_weights is None:
@@ -661,8 +671,13 @@ class Model(Container):
             updates = self.updates + training_updates
 
             # returns loss and metrics. Updates weights at each call.
-            self.train_function = K.function(inputs,
-                                             [self.total_loss] + self.metrics,
+
+            outputs = [self.total_loss] + self.metrics
+            if len(self.online_outputs) > 0:
+                outputs += self.online_outputs 
+
+            self.train_function = K.function(inputs, 
+                                             outputs,
                                              updates=updates,
                                              **self._function_kwargs)
 
@@ -782,6 +797,8 @@ class Model(Container):
                 outs = f(ins_batch)
                 if type(outs) != list:
                     outs = [outs]
+                if len(outs) > len(out_labels):
+                    outs, self.last_online_output = outs[:len(out_labels)], outs[len(out_labels):]
                 for l, o in zip(out_labels, outs):
                     batch_logs[l] = o
 

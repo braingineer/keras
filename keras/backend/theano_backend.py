@@ -161,6 +161,24 @@ def gather(reference, indices):
     '''
     return reference[indices]
 
+def colgather(reference, col_indices, row_indices=None):
+    '''select indices from the specified cols in 1st dim for specified rows in 0th dim
+
+    # Arguments
+    reference: a tensor 
+    col_indices: a set of int indices; 
+                 If row_indices is not specified, it should have the shape property
+    row_indices: (optional) a set of int indices;
+                 Has to match the size of col_indices
+
+    # Returns
+        Tensor with columns selected and 1 less ndim
+    '''
+    row_indices = row_indices or T.arange(col_indices.shape[0])
+    indices = [row_indices, col_indices] + [slice(None) for _ in range(2,reference.ndim)]
+    return reference[indices]
+    #return reference.dimshuffle(pattern)[indices].dimshuffle(pattern)[O,O]
+
 
 # ELEMENT-WISE OPERATIONS
 
