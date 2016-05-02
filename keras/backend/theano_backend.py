@@ -175,10 +175,13 @@ def colgather(reference, col_indices, row_indices=None):
         Tensor with columns selected and 1 less ndim
     '''
     row_indices = row_indices or T.arange(col_indices.shape[0])
-    indices = [row_indices, col_indices] + [slice(None) for _ in range(2,reference.ndim)]
+    indices = tuple([row_indices, col_indices] + [slice(None) for _ in range(2,reference.ndim)])
     return reference[indices]
     #return reference.dimshuffle(pattern)[indices].dimshuffle(pattern)[O,O]
 
+
+def arange(x):
+    return T.arange(x)
 
 # ELEMENT-WISE OPERATIONS
 
@@ -355,15 +358,17 @@ def resize_volumes(X, depth_factor, height_factor, width_factor, dim_ordering):
         raise Exception('Invalid dim_ordering: ' + dim_ordering)
 
 
-def repeat(x, n):
+def repeat(x, n, axis=1):
     '''Repeat a 2D tensor.
 
     If x has shape (samples, dim) and n=2,
     the output will have shape (samples, 2, dim).
     '''
-    assert x.ndim == 2
-    x = x.dimshuffle((0, 'x', 1))
-    return T.extra_ops.repeat(x, n, axis=1)
+    # at most, add a new axis at the end. 
+    assert 0 < axis <= x.ndim # allow last dim repeats, but not batch dim repeats
+    x = expand_dims(x, axis)
+    return T.extra_ops.repeat(x, n, axis=axis)
+
 
 
 def tile(x, n):
@@ -698,6 +703,94 @@ def rnn(step_function, inputs, initial_states,
     states = [T.squeeze(state[-1]) for state in states]
     return last_output, outputs, states
 
+
+def stack_rnn(step_function, inputs, initial_states, stack_indices, 
+                             go_backwards=False, 
+                             mask=None, constants=None, unroll=False,
+                             input_length=None):
+
+    ndim = inputs.ndim
+    assert ndim >= 3, 'Input should be at least 3D.'
+
+    axes = [1, 0] + list(range(2, ndim))
+    inputs = inputs.dimshuffle(axes)
+    stack_indices = stack_indices.dimshuffle([1,0])
+
+    if constants is None:
+        constants = []
+
+    if mask is not None:
+        if mask.ndim == ndim-1:
+            mask = expand_dims(mask)
+        assert mask.ndim == ndim
+        mask = mask.dimshuffle(axes)
+
+        
+        # build an all-zero tensor of shape (samples, output_dim)
+        init_states = [s[0,:,:] for s in initial_states]
+        initial_output = step_function(inputs[0], init_states + constants)[0] * 0
+        # Theano gets confused by broadcasting patterns in the scan op
+        initial_output = T.unbroadcast(initial_output, 0, 1)
+
+        def _step(input, mask, stack_index, iter_index, output_tm1, h_tensor, c_tensor, *constants):
+            batch_index = T.arange(stack_index.shape[0])
+            hm1 = colgather(h_tensor, batch_index, stack_index) 
+            #hm1 = h_tensor[stack_index]
+            cm1 = colgather(c_tensor, batch_index, stack_index)
+            #cm1 = c_tensor[stack_index]
+            output, [h, c] = step_function(input, [hm1, cm1]+list(constants))
+            output = T.switch(mask, output, output_tm1)
+            h = T.switch(mask, h, hm1)
+            c = T.switch(mask, c, cm1)
+            return [output, T.set_subtensor(h_tensor[iter_index], h), 
+                            T.set_subtensor(c_tensor[iter_index], c)]
+
+        (outputs, htensor, ctensor), _ = theano.scan(
+                                        _step,
+                                        sequences=[inputs, 
+                                                   mask, 
+                                                   stack_indices, 
+                                                   T.arange(inputs.shape[0])],
+                                        outputs_info=[initial_output]+initial_states,
+                                        non_sequences=constants,
+                                        go_backwards=go_backwards)     
+
+        htensor = htensor[-1]
+        ctensor = ctensor[-1]   
+
+        
+    else:
+
+        def _step(input, stack_index, iter_index, h_tensor, c_tensor, *constants):
+            batch_index = T.arange(stack_index.shape[0])
+            hm1 = colgather(h_tensor, batch_index, stack_index) 
+            #hm1 = h_tensor[stack_index]
+            cm1 = colgather(c_tensor, batch_index, stack_index)
+            #cm1 = c_tensor[stack_index]
+            output, [h, c] = step_function(input, [hm1, cm1]+list(constants))
+            return [output, T.set_subtensor(h_tensor[iter_index], h), 
+                            T.set_subtensor(c_tensor[iter_index], c)]
+
+        (outputs, htensor, ctensor), _ = theano.scan(
+                                        _step,
+                                        sequences=[inputs,
+                                                   stack_indices, 
+                                                   T.arange(inputs.shape[0])],
+                                        outputs_info=[None]+initial_states,
+                                        non_sequences=constants,
+                                        go_backwards=go_backwards)     
+
+        htensor = htensor[-1]
+        ctensor = ctensor[-1]   
+
+
+
+    outputs = T.squeeze(outputs)
+    last_output = outputs[-1]
+
+    axes = [1, 0] + list(range(2, outputs.ndim))
+    outputs = outputs.dimshuffle(axes)
+    return last_output, outputs, [htensor, ctensor]
 
 def switch(condition, then_expression, else_expression):
     '''condition: scalar tensor.

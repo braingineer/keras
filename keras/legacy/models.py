@@ -528,6 +528,8 @@ class Graph(Model):
 
     def predict_on_batch(self, data):
         output_list = super(Graph, self).predict_on_batch(data)
+        if not isinstance(output_list, list):
+            output_list = list
         return dict(zip(self._graph_outputs, output_list))
 
     def fit_generator(self, generator, samples_per_epoch, nb_epoch,

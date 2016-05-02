@@ -335,25 +335,26 @@ class RepeatVector(Layer):
     # Output shape
         3D tensor of shape `(nb_samples, n, features)`.
     '''
-    def __init__(self, n, **kwargs):
+    def __init__(self, n, axis=1, **kwargs):
         self.n = n
         self.supports_masking = True
-        self.input_spec = [InputSpec(ndim=2)]
+        self.axis = axis
+        self.input_spec = [InputSpec(ndim="%d+"%(axis+1))]
         super(RepeatVector, self).__init__(**kwargs)
 
     def get_output_shape_for(self, input_shape):
-        return (input_shape[0], self.n, input_shape[1])
+        return input_shape[:self.axis] + (self.n,)+ input_shape[self.axis:]
 
     def call(self, x, mask=None):
-        return K.repeat(x, self.n)
+        return K.repeat(x, self.n, self.axis)
 
     def compute_mask(self, x, mask=None):
         if mask is None:
             return None
-        return K.repeat(mask, self.n)
+        return K.expand_dims(K.repeat(mask, self.n, self.axis))
 
     def get_config(self):
-        config = {'n': self.n}
+        config = {'n': self.n, 'axis': self.axis}
         base_config = super(RepeatVector, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
@@ -575,6 +576,8 @@ class Dense(Layer):
         self.W_constraint = constraints.get(W_constraint)
         self.b_constraint = constraints.get(b_constraint)
         
+        self.supports_masking = True
+
         self.bias = bias
         self.initial_weights = weights
         self.input_spec = [InputSpec(ndim=2)]

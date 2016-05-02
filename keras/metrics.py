@@ -1,5 +1,6 @@
 from . import backend as K
 from operator import mul
+import ikelos
 
 from .utils.generic_utils import get_from_module
 
@@ -9,8 +10,7 @@ def binary_accuracy(y_true, y_pred, mask=None):
 
 def categorical_accuracy(y_true, y_pred, mask=None):
     if mask is not None:
-        if K.ndim(y_pred) == K.ndim(mask):
-            mask = K.max(mask, axis=-1)
+        mask = ikelos.utils.normalize_mask(y_pred, mask)
         eval_shape = (reduce(mul, K.shape(y_true)[:-1]), K.shape(y_true)[-1])
         y_true_flat = K.reshape(y_true, eval_shape)
         y_pred_flat = K.reshape(y_pred, eval_shape)

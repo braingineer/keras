@@ -79,8 +79,9 @@ class TimeDistributed(Wrapper):
     # Arguments
         layer: a layer instance.
     """
-    def __init__(self, layer, **kwargs):
+    def __init__(self, layer, force_reshape=False, **kwargs):
         self.supports_masking = True
+        self.force_reshape = force_reshape
         super(TimeDistributed, self).__init__(layer, **kwargs)
 
     def build(self, input_shape):
@@ -105,14 +106,28 @@ class TimeDistributed(Wrapper):
             self.layer.built = True
         super(TimeDistributed, self).build()
 
-    def compute_smask(self, x, mask=None):
+    def compute_mask(self, x, mask=None):
         if mask is None:
             return None
-
-        def step(x, states):
-            self.layer.compute_mask(x)
-
-        _, mask, _ = K.rnn(step, mask)
+        outmask = []
+        for i in range(self.input_spec[0].shape[1]):
+            mask_i = self.layer.compute_mask(x[:,i], mask[:,i])
+            if mask_i is None:
+                return None
+            else:
+                outmask.append(mask_i)
+        outmask = K.pack(tuple(outmask))
+        axes = [1, 0] + list(range(2, K.ndim(mask_i)))
+        if len(axes) < K.ndim(outmask):
+            extra = tuple(range(len(axes), K.ndim(outmask)))
+            outmask = K.any(outmask, axis=extra)
+            axes = axes[:K.ndim(outmask)]
+        try:
+            outmask = K.permute_dimensions(outmask, axes)
+        except:
+            import pdb
+            pdb.set_trace()
+        return outmask
 
     def get_output_shape_for(self, input_shape):
         child_input_shape = (input_shape[0],) + input_shape[2:]
@@ -122,7 +137,7 @@ class TimeDistributed(Wrapper):
 
     def call(self, X, mask=None):
         input_shape = self.input_spec[0].shape
-        if input_shape[0]:
+        if input_shape[0] and not self.force_reshape:
             # batch size matters, use rnn-based implementation
             def step(x, states):
                 output = self.layer.call(x)

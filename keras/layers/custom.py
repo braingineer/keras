@@ -38,12 +38,128 @@ class DenseFork(MaxoutDense):
         return output
 
 
+class DynamicEmbedding(Embedding):
+    def __init__(self, embedding_matrix, mode='matrix', *args, **kwargs):
+        assert hasattr(embedding_matrix, '_keras_shape')
+        self.W = embedding_matrix
+        if mode=='tensor':
+            assert len(embedding_matrix._keras_shape) == 3
+            indim = self.W._keras_shape[1]
+            outdim = self.W._keras_shape[2]
+        else:
+            assert len(embedding_matrix._keras_shape) == 2
+            indim, outdim = self.W._keras_shape
+
+        self.mode = mode
+        super(DynamicEmbedding, self).__init__(indim, outdim, *args, **kwargs)
+        
+    def build(self, input_shape):
+        self.constraints = {}
+        if self.W_constraint:
+            self.constraints[self.W] = self.W_constraint
+
+        self.regularizers = []
+        if self.W_regularizer:
+            self.W_regularizer.set_param(self.W)
+            self.regularizers.append(self.W_regularizer)
+
+        if self.activity_regularizer:
+            self.activity_regularizer.set_layer(self)
+            self.regularizers.append(self.activity_regularizer)
+
+        if self.initial_weights is not None:
+            self.set_weights(self.initial_weights)
+            
+    def call(self, x, mask=None):
+        if 0. < self.dropout < 1.:
+            retain_p = 1. - self.dropout
+            dims = self.W._keras_shape[:-1]
+            B = K.random_binomial(dims, p=retain_p) * (1. / retain_p)
+            B = K.expand_dims(B)
+            W = K.in_train_phase(self.W * B, self.W)
+        else:
+            W = self.W
+        
+        if self.mode == 'matrix':
+            return K.gather(W,x)
+        elif self.mode == 'tensor':
+            # quick and dirty: only allowing for 3dim inputs when it's tensor mode
+            assert K.ndim(x) == 3
+            # put sequence on first; gather; take diagonal across shared batch dimension
+            # in other words, W is (B, S, F)
+            # incoming x is (B, S, A)
+            inds = K.arange(self.W._keras_shape[0])
+            #out = K.gather(K.permute_dimensions(W, (1,0,2)), x).diagonal(axis1=0, axis2=3)
+            #return K.permute_dimensions(out, (3,0,1,2))
+            ### method above doesn't do grads =.=
+            out = K.gather(K.permute_dimensions(W, (1,0,2)), x)
+            out = K.permute_dimensions(out, (0,3,1,2,4))
+            out = K.gather(out, (inds, inds))
+            return out
+        else:
+            raise Exception('sanity check. should not be here.')
+
+        #all_dims = T.arange(len(self.W._keras_shape))
+        #first_shuffle = [all_dims[self.embed_dim]] + all_dims[:self.embed_dim] + all_dims[self.embed_dim+1:]
+        ## 1. take diagonal from 0th to
+        ## chang eof tactics
+        ## embed on time or embed on batch. that's all I'm supporting.  
+        ## if it's embed on time, then, x.ndim+1 is where batch will be, and is what
+        ## i need to take the diagonal over. 
+        ## now dim shuffle the xdims + 1 to the front.
+        #todo: get second shuffle or maybe find diagonal calculations
+        #out = K.gather(W, x)
+        #return out
+
+        ### reference
+        #A = S(np.arange(60).reshape(3,4,5))
+        #x = S(np.random.randint(0, 4, (3,4,10)))
+        #x_emb = A.dimshuffle(1,0,2)[x].dimshuffle(0,3,1,2,4)[T.arange(A.shape[0]), T.arange(A.shape[0])]
+
+
+class MutualEnergy(Activation):
+    ''' assumes two inputs; assumes both are same shape '''
+    def get_output_shape_for(self, input_shapes):
+        return input_shapes[0][:-1]
+
+    def compute_mask(self, x, mask=None):
+        if mask is None:
+            return None
+        out = None
+        for mask_i in mask:
+            if mask_i is None:
+                continue
+            if out is None:
+                out = mask_i
+            else:
+                out *= mask_i
+        return out
+
+    def call(self, xs, mask=None):
+        x1, x2 = xs
+        energy = x1*x2
+        if mask is not None:
+            for mask_i in mask:
+                if mask_i is None: continue
+                if K.ndim(mask_i) > K.ndim(x1):
+                    mask_i = K.any(mask_i)
+                elif K.ndim(mask_i) < K.ndim(x1):
+                    mask_i = K.expand_dims(mask_i)
+                energy *= mask_i
+        energy = K.sum(energy, axis=-1)
+
+        return self.activation(energy)
+
+
+
 class ProbabilityTensor(Wrapper):
     """ function for turning 3d tensor to 2d probability matrix """
     def __init__(self, dense_function=None, *args, **kwargs):
         self.supports_masking = True
         self.input_spec = [InputSpec(ndim=3)]
-        layer = Distribute(dense_function) or Distribute(Dense(1, name='ptensor_func'))
+        if dense_function is None:
+            dense_function = Dense(1, name='ptensor_func')
+        layer = Distribute(dense_function)
         super(ProbabilityTensor, self).__init__(layer, *args, **kwargs)
 
     def build(self, input_shape):
@@ -118,6 +234,30 @@ class SoftAttention(ProbabilityTensor):
         expanded_p = K.repeat_elements(p_vectors, K.shape(x)[2], axis=2)
         return K.sum(expanded_p * x, axis=1)
 
+class EZAttend(Layer):
+    def __init__(self, p_tensor, *args, **kwargs):
+        self.supports_masking = True
+        self.p_tensor = p_tensor
+        super(EZAttend, self).__init__(*args, **kwargs)
+
+    def compute_mask(self, x, mask=None):
+        return None
+
+    def get_output_shape_for(self, input_shape):
+        last_dim = K.ndim(self.p_tensor)
+        output_shape = list(input_shape)
+        output_shape.pop(last_dim-1)
+        return tuple(output_shape)
+
+    def call(self, target_tensor, mask=None):
+        last_dim = K.ndim(self.p_tensor)
+        expanded_p = K.repeat_elements(K.expand_dims(self.p_tensor, last_dim), 
+                                       K.shape(target_tensor)[last_dim], 
+                                       axis=last_dim)
+        return K.sum(expanded_p * target_tensor, axis=last_dim-1)
+
+
+
 class Fix(Flatten):
     '''Flattens the input. Does not affect the batch size.
 
@@ -156,8 +296,6 @@ class LambdaMask(Layer):
         return x
 
 class Summarize(Wrapper):
-    #def __init__(self, summary_space_size, *args, **kwargs):
-    #    self.summary_space_size = summary_space_size
     def __init__(self, summarizer, *args, **kwargs):
         self.supports_masking = True
         super(Summarize, self).__init__(summarizer, *args, **kwargs)
@@ -167,8 +305,9 @@ class Summarize(Wrapper):
         Should be called at the end of .build() in the
         children classes.
         '''        
-        assert len(input_shape) > 3
-        self.input_spec = [InputSpec(shape=input_shape)]
+        ndim = len(input_shape)
+        assert ndim >= 3
+        self.input_spec = [InputSpec(ndim=str(ndim)+'+')]
         if K._BACKEND == 'tensorflow':
             if not input_shape[1]:
                 raise Exception('When using TensorFlow, you should define '
@@ -186,6 +325,7 @@ class Summarize(Wrapper):
         child_input_shape = (np.prod(input_shape[:-2]),) + input_shape[-2:]
         if not self.layer.built:
             self.layer.build(child_input_shape)
+            self.layer.built = True
 
         self.trainable_weights = getattr(self.layer, 'trainable_weights', [])
         self.non_trainable_weights = getattr(self.layer, 'non_trainable_weights', [])
@@ -197,7 +337,6 @@ class Summarize(Wrapper):
         child_input_shape = (1,) + input_shape[-2:]
         child_output_shape = self.layer.get_output_shape_for(child_input_shape)
         return input_shape[:-2] + child_output_shape[-1:]
-        #return input_shape[:-2] + (self.summary_space_size,)
 
     def compute_mask(self, x, mask=None):
         if mask is None:
@@ -206,11 +345,11 @@ class Summarize(Wrapper):
         num_reducing = K.ndim(mask) - target_dim
         if num_reducing:
             axes = tuple([-i for i in range(1,num_reducing+1)])
-            mask = K.max(mask, axes)
+            mask = K.any(mask, axes)
         return mask
 
     def call(self, x, mask=None):
-        input_shape = self.input_spec[0].shape
+        input_shape = x._keras_shape
         x = K.reshape(x, (-1,) + input_shape[-2:]) # (batch * d1 * ... * dn-2, dn-1, dn)
         mask_shape = (K.shape(x)[0], -1)
         mask = K.reshape(mask, mask_shape) # give it the same first dim
@@ -222,3 +361,154 @@ class Summarize(Wrapper):
         config = {}  #'summary_space_size': self.summary_space_size
         base_config = super(Summarize, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+
+class LastDimDistribute(Wrapper):
+    def __init__(self, distributee, *args, **kwargs):
+        self.supports_masking = True
+        super(LastDimDistribute, self).__init__(distributee, *args, **kwargs)
+
+    def build(self, input_shape=None):
+        '''Assumes that self.layer is already set.
+        Should be called at the end of .build() in the
+        children classes.
+        '''        
+        assert len(input_shape) >= 3
+        self.input_spec = [InputSpec(shape=input_shape)]
+        if K._BACKEND == 'tensorflow':
+            if not input_shape[1]:
+                raise Exception('When using TensorFlow, you should define '
+                                'explicitly the number of timesteps of '
+                                'your sequences.\n'
+                                'If your first layer is an Embedding, '
+                                'make sure to pass it an "input_length" '
+                                'argument. Otherwise, make sure '
+                                'the first layer has '
+                                'an "input_shape" or "batch_input_shape" '
+                                'argument, including the time axis.')
+
+
+
+        child_input_shape = (np.prod(input_shape[:-1]),) + input_shape[-1:]
+        if not self.layer.built:
+            self.layer.build(child_input_shape)
+            self.layer.built = True
+
+        self.trainable_weights = getattr(self.layer, 'trainable_weights', [])
+        self.non_trainable_weights = getattr(self.layer, 'non_trainable_weights', [])
+        self.updates = getattr(self.layer, 'updates', [])
+        self.regularizers = getattr(self.layer, 'regularizers', [])
+        self.constraints = getattr(self.layer, 'constraints', {})
+
+    def get_output_shape_for(self, input_shape):
+        child_input_shape = (1,) + input_shape[-1:]
+        child_output_shape = self.layer.get_output_shape_for(child_input_shape)
+        return input_shape[:-1] + child_output_shape[-1:]
+
+    def call(self, x, mask=None):
+        input_shape = self.input_spec[0].shape
+        x = K.reshape(x, (-1,) + input_shape[-1:]) # (batch * d1 * ... * dn-2*dn-1, dn)
+        mask_shape = (K.shape(x)[0], -1)
+        mask = K.reshape(mask, mask_shape) # give it the same first dim
+        y = self.layer.call(x, mask)
+        output_shape = self.get_output_shape_for(input_shape)
+        return K.reshape(y, output_shape)
+
+    def get_config(self):
+        config = {}  #'summary_space_size': self.summary_space_size
+        base_config = super(LastDimDistribute, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+
+class StackLSTM(LSTM):
+    def build(self, input_shapes):
+        assert isinstance(input_shapes, list)
+        rnn_shape, indices_shape = input_shapes
+        super(StackLSTM, self).build(rnn_shape)
+        self.input_spec += [InputSpec(shape=indices_shape)]
+
+    def get_initial_states(self, x):
+        # build an all-zero tensor of shape (samples, output_dim)
+        initial_state = K.zeros_like(x)  # (samples, timesteps, input_dim)
+        initial_state = K.permute_dimensions(x, [1,0,2]) # (timesteps, samples, input_dim)
+        reducer = K.zeros((self.input_dim, self.output_dim))
+        initial_state = K.dot(initial_state, reducer)  # (timesteps, samples, output_dim)
+        initial_states = [initial_state for _ in range(len(self.states))]
+        return initial_states
+
+    def reset_states(self):
+        assert self.stateful, 'Layer must be stateful.'
+        input_shape = self.input_spec[0].shape
+        if not input_shape[0]:
+            raise Exception('If a RNN is stateful, a complete ' +
+                            'input_shape must be provided (including batch size).')
+        if hasattr(self, 'states'):
+            K.set_value(self.states[0],
+                        np.zeros((input_shape[1], input_shape[0], self.output_dim)))
+            K.set_value(self.states[1],
+                        np.zeros((input_shape[1], input_shape[0], self.output_dim)))
+        else:
+            self.states = [K.zeros((input_shape[1], input_shape[0], self.output_dim)),
+                           K.zeros((input_shape[1], input_shape[0], self.output_dim))]
+    
+    def get_output_shape_for(self, input_shapes):
+        rnn_shape, indices_shape = input_shapes
+        return super(StackLSTM, self).get_output_shape_for(rnn_shape)
+
+    def compute_mask(self, input, mask):
+        if self.return_sequences:
+            if isinstance(mask, list):
+                return mask[0]
+            return mask
+        else:
+            return None
+    
+    def call(self, xpind, mask=None):
+        # input shape: (nb_samples, time (padded with zeros), input_dim)
+        # note that the .build() method of subclasses MUST define
+        # self.input_spec with a complete input shape.
+        x, indices = xpind
+        if isinstance(mask, list):
+            mask, _ = mask
+        input_shape = self.input_spec[0].shape
+        if K._BACKEND == 'tensorflow':
+            if not input_shape[1]:
+                raise Exception('When using TensorFlow, you should define '
+                                'explicitly the number of timesteps of '
+                                'your sequences.\n'
+                                'If your first layer is an Embedding, '
+                                'make sure to pass it an "input_length" '
+                                'argument. Otherwise, make sure '
+                                'the first layer has '
+                                'an "input_shape" or "batch_input_shape" '
+                                'argument, including the time axis. '
+                                'Found input shape at layer ' + self.name +
+                                ': ' + str(input_shape))
+        if self.stateful:
+            initial_states = self.states
+        else:
+            initial_states = self.get_initial_states(x)
+        constants = self.get_constants(x)
+        preprocessed_input = self.preprocess_input(x)
+
+        last_output, outputs, states = K.stack_rnn(self.step, 
+                                                   preprocessed_input,
+                                                   initial_states, 
+                                                   indices,
+                                                   go_backwards=self.go_backwards,
+                                                   mask=mask,
+                                                   constants=constants,
+                                                   unroll=self.unroll,
+                                                   input_length=input_shape[1])
+        if self.stateful:
+            self.updates = []
+            for i in range(len(states)):
+                self.updates.append((self.states[i], states[i]))
+            self.cached_states = states
+
+        if self.return_sequences:
+            return outputs
+        else:
+            return last_output

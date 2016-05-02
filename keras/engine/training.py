@@ -18,6 +18,7 @@ from .. import objectives
 from .. import metrics as metrics_module
 from ..utils.generic_utils import Progbar
 from .. import callbacks as cbks
+import ikelos
 
 
 def standardize_input_data(data, names, shapes=None, check_batch_dim=True,
@@ -311,10 +312,10 @@ def weighted_objective(fn):
         score_array = fn(y_true, y_pred)
         if mask is not None:
             # Cast the mask to floatX to avoid float64 upcasting in theano
-            mask = K.cast(mask, K.floatx())
-            if K.ndim(score_array) == K.ndim(mask) - 1:
-                mask = K.max(mask, axis=-1, keepdims=True)
-                score_array = K.expand_dims(score_array, -1)
+            mask = ikelos.utils.normalize_mask(score_array, mask)
+            #if K.ndim(score_array) == K.ndim(mask) - 1:
+            #    mask = K.max(mask, axis=-1, keepdims=True)
+            #    score_array = K.expand_dims(score_array, -1)
             # mask should have the same shape as score_array
             score_array *= mask
             #  the loss per batch should be proportional
@@ -656,6 +657,7 @@ class Model(Container):
         self.predict_function = None
 
     def _make_train_function(self):
+
         if self.train_function is None:
             if self.uses_learning_phase:
                 inputs = self.inputs + self.targets + self.sample_weights + [K.learning_phase()]
@@ -938,7 +940,7 @@ class Model(Container):
         sample_weights = [standardize_weights(ref, sw, cw, mode)
                           for (ref, sw, cw, mode)
                           in zip(y, sample_weights, class_weights, self.sample_weight_modes)]
-        check_array_lengths(x, y, sample_weights)
+        #check_array_lengths(x, y, sample_weights)
         check_loss_and_target_compatibility(y, self.loss_functions, self.internal_output_shapes)
         if self.stateful and batch_size:
             if x[0].shape[0] % batch_size != 0:
@@ -1234,7 +1236,7 @@ class Model(Container):
     def fit_generator(self, generator, samples_per_epoch, nb_epoch,
                       verbose=1, callbacks=[],
                       validation_data=None, nb_val_samples=None,
-                      class_weight={}, max_q_size=10):
+                      class_weight={}, max_q_size=10, batch_size=None):
         '''Fits the model on data generated batch-by-batch by
         a Python generator.
         The generator is run in parallel to the model, for efficiency.
@@ -1376,12 +1378,13 @@ class Model(Container):
                                     'or (x, y). Found: ' + str(generator_output))
                 # build batch logs
                 batch_logs = {}
-                if type(x) is list:
-                    batch_size = len(x[0])
-                elif type(x) is dict:
-                    batch_size = len(list(x.values())[0])
-                else:
-                    batch_size = len(x)
+                if batch_size is None:
+                    if type(x) is list:
+                        batch_size = len(x[0])
+                    elif type(x) is dict:
+                        batch_size = len(list(x.values())[0])
+                    else:
+                        batch_size = len(x)
 
                 batch_logs['batch'] = batch_index
                 batch_logs['size'] = batch_size
