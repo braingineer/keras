@@ -309,18 +309,22 @@ def weighted_objective(fn):
     '''
     def weighted(y_true, y_pred, weights, mask=None):
         # score_array has ndim >= 2
+
         score_array = fn(y_true, y_pred)
         if mask is not None:
             # Cast the mask to floatX to avoid float64 upcasting in theano
-            mask = ikelos.utils.normalize_mask(score_array, mask)
-            #if K.ndim(score_array) == K.ndim(mask) - 1:
-            #    mask = K.max(mask, axis=-1, keepdims=True)
-            #    score_array = K.expand_dims(score_array, -1)
+            mask = K.cast(mask, K.floatx())
             # mask should have the same shape as score_array
+            if mask.ndim == score_array.ndim - 1:
+                mask = K.expand_dims(mask)
+            elif mask.ndim == score_array.ndim + 1:
+                mask = K.any(mask, axis=-1) #any or all? 
             score_array *= mask
             #  the loss per batch should be proportional
             #  to the number of unmasked samples.
             score_array /= K.mean(mask)
+        score_array = fn(y_true, y_pred)
+       
 
         # reduce score_array to same ndim as weight array
         ndim = K.ndim(score_array)
@@ -663,13 +667,19 @@ class Model(Container):
                 inputs = self.inputs + self.targets + self.sample_weights + [K.learning_phase()]
             else:
                 inputs = self.inputs + self.targets + self.sample_weights
+            #if self.debug_statements:
+            #    inputs += self.debug_statements
 
             # get trainable weights
             trainable_weights = []
             for layer in self.layers:
                 trainable_weights += collect_trainable_weights(layer)
 
-            training_updates = self.optimizer.get_updates(trainable_weights, self.constraints, self.total_loss)
+            import pdb
+            #pdb.set_trace()
+            trainable_weights = [w for w in trainable_weights if not hasattr(w, 'ignore_me')]
+
+            training_updates, debugprints = self.optimizer.get_updates(trainable_weights, self.constraints, self.total_loss)
             updates = self.updates + training_updates
 
             # returns loss and metrics. Updates weights at each call.
@@ -678,10 +688,12 @@ class Model(Container):
             if len(self.online_outputs) > 0:
                 outputs += self.online_outputs 
 
+            print("Making the training function")
             self.train_function = K.function(inputs, 
                                              outputs,
                                              updates=updates,
-                                             **self._function_kwargs)
+                                             **self._function_kwargs) 
+            print("Training function has been made")
 
     def _make_test_function(self):
         if self.test_function is None:
@@ -799,8 +811,11 @@ class Model(Container):
                 outs = f(ins_batch)
                 if type(outs) != list:
                     outs = [outs]
-                if len(outs) > len(out_labels):
-                    outs, self.last_online_output = outs[:len(out_labels)], outs[len(out_labels):]
+                outs, rest = outs[:len(out_labels)], out[len(out_labels):]
+                if len(rest) > 0:
+                    pass
+                #if len(outs) > len(out_labels):
+                #    outs, self.last_online_output = outs[:len(out_labels)], outs[len(out_labels):]
                 for l, o in zip(out_labels, outs):
                     batch_logs[l] = o
 

@@ -406,7 +406,7 @@ class Lambda(Layer):
     # Output shape
         Specified by `output_shape` argument.
     '''
-    def __init__(self, function, output_shape=None, arguments={}, **kwargs):
+    def __init__(self, function, output_shape=None, mask_function=None, arguments={}, **kwargs):
         self.function = function
         self.arguments = arguments
         if output_shape is None:
@@ -418,6 +418,15 @@ class Lambda(Layer):
                 raise Exception('In Lambda, `output_shape` '
                                 'must be a list, a tuple, or a function.')
             self._output_shape = output_shape
+        if mask_function is None:
+            self._mask_function = None
+        elif hasattr(mask_function, '__call__'):
+            self._mask_function = mask_function
+        else:
+            raise Exception("In Lambda, `mask_function` "
+                            "must be a function that computes the new mask")
+
+        self.supports_masking = True
         super(Lambda, self).__init__(**kwargs)
 
     def get_output_shape_for(self, input_shape):
@@ -452,6 +461,12 @@ class Lambda(Layer):
             arguments['mask'] = mask
         return self.function(x, **arguments)
 
+    def compute_mask(self, x, mask=None):
+        if self._mask_function is not None:
+            return self._mask_function(x, mask)
+        else:
+            return mask
+
     def get_config(self):
         py3 = sys.version_info[0] == 3
 
@@ -464,6 +479,19 @@ class Lambda(Layer):
         else:
             function = self.function.__name__
             function_type = 'function'
+
+        if isinstance(self._mask_function, python_types.LambdaType):
+            if py3:
+                mask_func = marshal.dumps(self._mask_function.__code__).decode('raw_unicode_escape')
+            else:
+                mask_func = marshal.dumps(self._mask_function.func_code).decode('raw_unicode_escape')
+            mask_func_type = 'lambda'
+        elif callable(self._mask_function):
+            mask_func = self._mask_function.__name__
+            mask_func_type = 'function'
+        else:
+            mask_func = 'unknown'
+            mask_func_type = 'unknown'
 
         if isinstance(self._output_shape, python_types.LambdaType):
             if py3:
@@ -480,6 +508,8 @@ class Lambda(Layer):
 
         config = {'function': function,
                   'function_type': function_type,
+                  'mask_function': mask_func,
+                  'mask_function_type': mask_func_type,
                   'output_shape': output_shape,
                   'output_shape_type': output_shape_type,
                   'arguments': self.arguments}

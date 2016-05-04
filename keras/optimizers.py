@@ -387,8 +387,13 @@ class Adam(Optimizer):
         ms = [K.variable(np.zeros(K.get_value(p).shape)) for p in params]
         vs = [K.variable(np.zeros(K.get_value(p).shape)) for p in params]
         self.weights = ms + vs
+        import theano
+        debugprints = []
+        F_db = theano.printing.Print("Debugprint")
 
         for p, g, m, v in zip(params, grads, ms, vs):
+            debugprints.append(F_db(p))
+            debugprints.append(F_db(g))
             m_t = (self.beta_1 * m) + (1. - self.beta_1) * g
             v_t = (self.beta_2 * v) + (1. - self.beta_2) * K.square(g)
             p_t = p - lr_t * m_t / (K.sqrt(v_t) + self.epsilon)
@@ -402,7 +407,7 @@ class Adam(Optimizer):
                 c = constraints[p]
                 new_p = c(new_p)
             self.updates.append((p, new_p))
-        return self.updates
+        return self.updates, debugprints
 
     def get_config(self):
         return {"name": self.__class__.__name__,

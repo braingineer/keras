@@ -1356,10 +1356,16 @@ class Merge(Layer):
 
         if self.mode in ['sum', 'mul', 'ave']:
             normalized = [self._normalize_mask_dims(m, i) for m, i in zip(mask, inputs)]
-            return K.eall(normalized)
+            eall = K.eall(normalized)
+            if K.ndim(eall) > 2: # AND mask along feature dimension
+                return K.all(eall, axis=2, keepdims=False)
+            return eall
         elif self.mode in ['concat']:
             normalized = [self._normalize_mask_dims(m, i) for m, i in zip(mask, inputs)]
-            return K.concatenate(normalized, axis=self.concat_axis)
+            concatenated = K.concatenate(normalized, axis=self.concat_axis)
+            if K.ndim(concatenated) > 2:
+                return K.all(concatenated, axis=-1)
+            return concatenated
         elif self.mode in ['cos', 'dot']:
             return None
         elif hasattr(self.mode, '__call__'):
@@ -1369,7 +1375,8 @@ class Merge(Layer):
             else:
                 return self._output_mask
         else:
-            raise Exception('Invalid merge mode (should have been caught earlier)')
+            # this should have been caught earlier
+            raise Exception('Invalid merge mode: {}'.format(self.mode))
 
     def get_config(self):
         py3 = sys.version_info[0] == 3

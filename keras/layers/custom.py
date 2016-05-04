@@ -6,7 +6,7 @@ from .embeddings import Embedding
 from ..engine import merge, Layer, InputSpec
 from ..activations import softmax
 import numpy as np
-
+from ..engine.topology import Node
 
 def get_shape(x):        
     if hasattr(x, '_keras_shape'):
@@ -21,6 +21,52 @@ def get_shape(x):
 
 def make_safe(x):
     return K.clip(x, K.common._EPSILON, 1.0 - K.common._EPSILON)
+
+
+def _fix_unknown_dimension(input_shape, output_shape):
+    '''Find and replace a single missing dimension in an output shape
+    given an input shape.
+
+    A near direct port of the internal numpy function _fix_unknown_dimension
+    in numpy/core/src/multiarray/shape.c
+
+    # Arguments
+        input_shape: shape of array being reshaped
+
+        output_shape: desired shape of the array with at most
+            a single -1 which indicates a dimension that should be
+            derived from the input shape.
+
+    # Returns
+        The new output shape with a -1 replaced with its computed value.
+
+        Raises a ValueError if the total array size of the output_shape is
+        different then the input_shape, or more then one unknown dimension
+        is specified.
+    '''
+    output_shape = list(output_shape)
+
+    msg = 'total size of new array must be unchanged'
+
+    known, unknown = 1, None
+    for index, dim in enumerate(output_shape):
+        if dim < 0:
+            if unknown is None:
+                unknown = index
+            else:
+                raise ValueError('can only specify one unknown dimension')
+        else:
+            known *= dim
+
+    original = np.prod(input_shape, dtype=int)
+    if unknown is not None:
+        if known == 0 or original % known != 0:
+            raise ValueError(msg)
+        output_shape[unknown] = original // known
+    elif original != known:
+        raise ValueError(msg)
+
+    return tuple(output_shape)
 
 class DenseFork(MaxoutDense):
     def __init__(self, output_dim, num_forks, *args, **kwargs):
@@ -298,6 +344,7 @@ class LambdaMask(Layer):
 class Summarize(Wrapper):
     def __init__(self, summarizer, *args, **kwargs):
         self.supports_masking = True
+        self.last_two = None
         super(Summarize, self).__init__(summarizer, *args, **kwargs)
 
     def build(self, input_shape=None):
@@ -308,6 +355,10 @@ class Summarize(Wrapper):
         ndim = len(input_shape)
         assert ndim >= 3
         self.input_spec = [InputSpec(ndim=str(ndim)+'+')]
+        #if input_shape is not None:
+        #    self.last_two = input_shape[-2:]
+        self._input_shape = input_shape
+        #self.input_spec = [InputSpec(shape=input_shape)]
         if K._BACKEND == 'tensorflow':
             if not input_shape[1]:
                 raise Exception('When using TensorFlow, you should define '
@@ -322,7 +373,8 @@ class Summarize(Wrapper):
 
 
 
-        child_input_shape = (np.prod(input_shape[:-2]),) + input_shape[-2:]
+        #child_input_shape = (np.prod(input_shape[:-2]),) + input_shape[-2:]
+        child_input_shape = (None,)+input_shape[-2:]
         if not self.layer.built:
             self.layer.build(child_input_shape)
             self.layer.built = True
@@ -341,21 +393,42 @@ class Summarize(Wrapper):
     def compute_mask(self, x, mask=None):
         if mask is None:
             return None
+        #import pdb
+        #pdb.set_trace()
         target_dim = K.ndim(x) - 2
         num_reducing = K.ndim(mask) - target_dim
         if num_reducing:
             axes = tuple([-i for i in range(1,num_reducing+1)])
             mask = K.any(mask, axes)
+
         return mask
 
     def call(self, x, mask=None):
-        input_shape = x._keras_shape
+        if hasattr(x, '_keras_shape'):
+            input_shape = x._keras_shape
+        else:
+            input_shape = self._input_shape
+        #import pdb
+        #pdb.set_trace()
+        #if self.last_two is not None:
+        #    last2 = self.last_two
+        #else:
+        #    input_shape = x._keras_shape
+        #    last2 = input_shape[-2:]
+        #out_shape = K.shape(x)[:-2]
+
         x = K.reshape(x, (-1,) + input_shape[-2:]) # (batch * d1 * ... * dn-2, dn-1, dn)
-        mask_shape = (K.shape(x)[0], -1)
-        mask = K.reshape(mask, mask_shape) # give it the same first dim
+        if mask is not None:
+            mask_shape = (K.shape(x)[0], -1)
+            mask = K.reshape(mask, mask_shape) # give it the same first dim
         y = self.layer.call(x, mask)
-        output_shape = self.get_output_shape_for(input_shape)
-        return K.reshape(y, output_shape)
+        #try:
+        #output_shape = self.get_output_shape_for(K.shape(x))
+        #except:
+        output_shape =  self.get_output_shape_for(input_shape)
+        #import pdb
+        #pdb.set_trace()
+        return K.cast(K.reshape(y, output_shape), K.floatx()) 
 
     def get_config(self):
         config = {}  #'summary_space_size': self.summary_space_size
@@ -512,3 +585,135 @@ class StackLSTM(LSTM):
             return outputs
         else:
             return last_output
+
+
+
+class FancyDense(Dense):
+    def __init__(self, fancy_W, middle_dim=None, out_dim=None, *args, **kwargs):
+        self.fancy_W = fancy_W
+        if middle_dim is None:
+            assert hasattr(self.fancy_W, '_keras_shape'), "In FancyDense, the fancyW does not have a keras shape"
+            assert self.fancy_W.ndim == 2, "In FancyDense, the fancyW has the wrong number of dims"
+            output_dim, middle_dim = self.fancy_W._keras_shape
+
+        super(FancyDense, self).__init__(output_dim, *args, **kwargs)
+
+        self.middle_dim = middle_dim
+        #self.output_dim = output_dim
+
+    def build(self, input_shape):
+        assert len(input_shape) == 2
+        input_dim = input_shape[1]
+        self.input_spec = [InputSpec(dtype=K.floatx(),
+                                     shape=(None, input_dim))]
+
+        # came in as an embedding.. leaving as an output
+        self.W = self.init((input_dim, self.middle_dim),
+                           name='{}_W'.format(self.name))
+        if self.bias:
+            self.b = K.zeros((self.output_dim,),
+                             name='{}_b'.format(self.name))
+            self.trainable_weights = [self.W, self.fancy_W, self.b]
+        else:
+            self.trainable_weights = [self.W, self.fancy_W]
+
+        self.regularizers = []
+        if self.W_regularizer:
+            self.W_regularizer.set_param(self.W)
+            self.regularizers.append(self.W_regularizer)
+
+        if self.b_regularizer and self.bias:
+            self.b_regularizer.set_param(self.b)
+            self.regularizers.append(self.b_regularizer)
+
+        if self.activity_regularizer:
+            self.activity_regularizer.set_layer(self)
+            self.regularizers.append(self.activity_regularizer)
+
+        self.constraints = {}
+        if self.W_constraint:
+            self.constraints[self.W] = self.W_constraint
+        if self.b_constraint and self.bias:
+            self.constraints[self.b] = self.b_constraint
+
+        if self.initial_weights is not None:
+            self.set_weights(self.initial_weights)
+            del self.initial_weights
+
+    def call(self, x, mask=None):
+        out_W = K.permute_dimensions(self.fancy_W, (1,0))
+        output = K.dot(K.dot(x, self.W), out_W)
+        if self.bias:
+            output += self.b
+        return self.activation(output)
+
+    def get_output_shape_for(self, input_shape):
+        assert input_shape and len(input_shape) == 2
+        return (input_shape[0], self.output_dim)
+
+    def get_config(self):
+        config = {'output_dim': self.output_dim,
+                  'init': self.init.__name__,
+                  'activation': self.activation.__name__,
+                  'W_regularizer': self.W_regularizer.get_config() if self.W_regularizer else None,
+                  'b_regularizer': self.b_regularizer.get_config() if self.b_regularizer else None,
+                  'activity_regularizer': self.activity_regularizer.get_config() if self.activity_regularizer else None,
+                  'W_constraint': self.W_constraint.get_config() if self.W_constraint else None,
+                  'b_constraint': self.b_constraint.get_config() if self.b_constraint else None,
+                  'input_dim': self.input_dim,
+                  'middle_dim': self.middle_dim,
+                  'bias': self.bias}
+        base_config = super(FancyDense, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+class DataLayer(Layer):
+    '''TODO: dosctring
+    '''
+    def __init__(self, input_tensor, input_dtype=None, name=None):
+        self.input_spec = None
+        self.supports_masking = False
+        self.uses_learning_phase = False
+        self.trainable = False
+        self.built = True
+        self.ignore_me = True
+
+        self.inbound_nodes = []
+        self.outbound_nodes = []
+
+        self.trainable_weights = []
+        self.non_trainable_weights = []
+        self.regularizers = []
+        self.constraints = {}
+
+        if not name:
+            prefix = 'static'
+            name = prefix + '_' + str(K.get_uid(prefix))
+        self.name = name
+
+        if not input_dtype:
+            input_dtype = K.floatx()
+
+        self.tensor = K.variable(input_tensor, dtype=input_dtype, name=name)
+        self.batch_input_shape = input_tensor.shape
+        self.tensor._keras_shape = input_tensor.shape
+        self.tensor._keras_history = (self, 0, 0)
+        self.tensor._uses_learning_phase = False
+
+        Node(self,
+             inbound_layers=[],
+             node_indices=[],
+             tensor_indices=[],
+             input_tensors=[self.tensor],
+             output_tensors=[self.tensor],
+             input_masks=[None],
+             output_masks=[None],
+             input_shapes=[self.batch_input_shape],
+             output_shapes=[self.batch_input_shape])
+
+    def get_config(self):
+        config = {'batch_input_shape': self.batch_input_shape,
+                  'input_dtype': self.input_dtype,
+                  'name': self.name}
+        return config
+
