@@ -395,6 +395,9 @@ def standardize_weights(y, sample_weight=None, class_weight=None,
         else:
             return np.ones((y.shape[0], y.shape[1]))
 
+class Qwrap(queue.Queue):
+    def _setdata(x):
+        self.x =x
 
 def generator_queue(generator, max_q_size=10,
                     wait_time=0.05, nb_worker=1, **kwargs):
@@ -661,10 +664,11 @@ class Model(Container):
         self.predict_function = None
 
     def _make_train_function(self):
+        filtered_in = [item for item in self.inputs if not hasattr(item, '_sideload')]
 
         if self.train_function is None:
             if self.uses_learning_phase:
-                inputs = self.inputs + self.targets + self.sample_weights + [K.learning_phase()]
+                inputs = filtered_in + self.targets + self.sample_weights + [K.learning_phase()]
             else:
                 inputs = self.inputs + self.targets + self.sample_weights
             #if self.debug_statements:
@@ -674,10 +678,6 @@ class Model(Container):
             trainable_weights = []
             for layer in self.layers:
                 trainable_weights += collect_trainable_weights(layer)
-
-            import pdb
-            #pdb.set_trace()
-            trainable_weights = [w for w in trainable_weights if not hasattr(w, 'ignore_me')]
 
             training_updates, debugprints = self.optimizer.get_updates(trainable_weights, self.constraints, self.total_loss)
             updates = self.updates + training_updates
@@ -696,11 +696,12 @@ class Model(Container):
             print("Training function has been made")
 
     def _make_test_function(self):
+        filtered_in = [item for item in self.inputs if not hasattr(item, '_sideload')]
         if self.test_function is None:
             if self.uses_learning_phase:
-                inputs = self.inputs + self.targets + self.sample_weights + [K.learning_phase()]
+                inputs = filtered_in + self.targets + self.sample_weights + [K.learning_phase()]
             else:
-                inputs = self.inputs + self.targets + self.sample_weights
+                inputs = filtered_in + self.targets + self.sample_weights
             # return loss and metrics, no gradient updates.
             # Does update the network states.
             self.test_function = K.function(inputs,
@@ -709,11 +710,12 @@ class Model(Container):
                                             **self._function_kwargs)
 
     def _make_predict_function(self):
+        filtered_in = [item for item in self.inputs if not hasattr(item, '_sideload')]
         if self.predict_function is None:
             if self.uses_learning_phase:
-                inputs = self.inputs + [K.learning_phase()]
+                inputs = filtered_in + [K.learning_phase()]
             else:
-                inputs = self.inputs
+                inputs = filtered_in
             # returns network outputs. Does not update weights.
             # Does update the network states.
             self.predict_function = K.function(inputs,

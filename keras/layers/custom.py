@@ -98,8 +98,19 @@ class DynamicEmbedding(Embedding):
 
         self.mode = mode
         super(DynamicEmbedding, self).__init__(indim, outdim, *args, **kwargs)
+
+        #layer, node_index, tensor_index = self.W._keras_history
+        #self.add_inbound_node(layer, node_index, tensor_index)
         
+        
+    def __call__(self, x, mask=None):
+        ### hacky. 
+        return super(DynamicEmbedding, self).__call__([x, self.W], mask)
+
     def build(self, input_shape):
+        if isinstance(input_shape, list):
+            input_shape,_ = input_shape
+
         self.constraints = {}
         if self.W_constraint:
             self.constraints[self.W] = self.W_constraint
@@ -116,7 +127,25 @@ class DynamicEmbedding(Embedding):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             
+        self.built = True
+
+    def compute_mask(self, x, mask=None):
+        if isinstance(x, list):
+            x,_ = x
+        if mask is not None and isinstance(mask, list):
+            mask,_ = mask
+        return super(DynamicEmbedding, self).compute_mask(x, mask)
+
+    def get_output_shape_for(self, input_shape):
+        if isinstance(input_shape, list):
+            input_shape,_ = input_shape
+        return super(DynamicEmbedding, self).get_output_shape_for(input_shape)
+
     def call(self, x, mask=None):
+        if isinstance(x, list): 
+            x,_ = x
+        if mask is not None and isinstance(mask, list):
+            mask,_ = mask
         if 0. < self.dropout < 1.:
             retain_p = 1. - self.dropout
             dims = self.W._keras_shape[:-1]
@@ -613,9 +642,9 @@ class FancyDense(Dense):
         if self.bias:
             self.b = K.zeros((self.output_dim,),
                              name='{}_b'.format(self.name))
-            self.trainable_weights = [self.W, self.fancy_W, self.b]
+            self.trainable_weights = [self.W, self.b]
         else:
-            self.trainable_weights = [self.W, self.fancy_W]
+            self.trainable_weights = [self.W]
 
         self.regularizers = []
         if self.W_regularizer:
@@ -699,6 +728,7 @@ class DataLayer(Layer):
         self.tensor._keras_shape = input_tensor.shape
         self.tensor._keras_history = (self, 0, 0)
         self.tensor._uses_learning_phase = False
+        self.tensor._sideload = True
 
         Node(self,
              inbound_layers=[],

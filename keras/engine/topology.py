@@ -1544,7 +1544,7 @@ class Container(Layer):
     # Class Methods
         from_config
     '''
-    def __init__(self, input, output, name=None):
+    def __init__(self, input, output, name=None, preloaded_data=None):
         # handle name argument
         if not name:
             prefix = self.__class__.__name__.lower()
@@ -1560,6 +1560,8 @@ class Container(Layer):
             self.outputs = list(output)
         else:
             self.outputs = [output]
+
+        self.preloaded_data = preloaded_data or []
 
         # check for redundancy in inputs:
         inputs_set = set(self.inputs)
@@ -1763,6 +1765,7 @@ class Container(Layer):
                 layer = node.outbound_layer
                 if layer:
                     for x in node.input_tensors:
+                        if hasattr(x, '_sideload'): continue
                         if x not in computable_tensors:
                             raise Exception(
                                 'Graph disconnected: '
@@ -2077,6 +2080,9 @@ class Container(Layer):
         tensor_map = {}
         for x, y, mask in zip(self.inputs, inputs, masks):
             tensor_map[str(id(x))] = (y, mask)
+
+        for x in self.preloaded_data:
+            tensor_map[str(id(x))] = (x, None)
 
         depth_keys = list(self.nodes_by_depth.keys())
         depth_keys.sort(reverse=True)

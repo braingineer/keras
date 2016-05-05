@@ -395,6 +395,7 @@ class Lambda(Layer):
             Takes one argument: the output of previous layer
         output_shape: Expected output shape from function.
             Could be a tuple or a function of the shape of the input
+        mask_function: A function which takes as input x and mask and returns a new mask
         arguments: optional dictionary of keyword arguments to be passed
             to the function.
 
@@ -420,13 +421,15 @@ class Lambda(Layer):
             self._output_shape = output_shape
         if mask_function is None:
             self._mask_function = None
+            self.supports_masking = False
         elif hasattr(mask_function, '__call__'):
             self._mask_function = mask_function
+            self.supports_masking = True
         else:
             raise Exception("In Lambda, `mask_function` "
                             "must be a function that computes the new mask")
 
-        self.supports_masking = True
+        
         super(Lambda, self).__init__(**kwargs)
 
     def get_output_shape_for(self, input_shape):
@@ -527,6 +530,15 @@ class Lambda(Layer):
         else:
             raise Exception('Unknown function type: ' + function_type)
 
+        mask_function_type = config.pop('mask_function_type')
+        if mask_function_type == 'function':
+            mask_function = globals()[config['mask_function']]
+        elif mask_function_type == 'lambda':
+            mask_function = marshal.loads(config['mask_function'].encode('raw_unicode_escape'))
+            mask_function = python_types.FunctionType(mask_function, globals())
+        else:
+            raise Exception('Unknown function type: ' + mask_function_type)
+
         output_shape_type = config.pop('output_shape_type')
         if output_shape_type == 'function':
             output_shape = globals()[config['output_shape']]
@@ -538,6 +550,7 @@ class Lambda(Layer):
 
         config['function'] = function
         config['output_shape'] = output_shape
+        config['mask_function'] = mask_function
         return cls(**config)
 
 
