@@ -268,6 +268,7 @@ class ProbabilityTensor(Wrapper):
             return mask
         elif K.ndim(mask) == 3:
             return K.any(mask, axis=-1)
+        return mask
 
     def compute_mask(self, x, mask=None):
         return None
@@ -281,7 +282,7 @@ class ProbabilityTensor(Wrapper):
             mask = self.squash_mask(mask)
             p_matrix = make_safe(p_matrix * mask)
             p_matrix = (p_matrix / K.sum(p_matrix, axis=-1, keepdims=True))*mask
-        return p_matrix
+        return make_safe(p_matrix)
 
     def get_config(self):
         config = {}
@@ -628,7 +629,6 @@ class FancyDense(Dense):
         super(FancyDense, self).__init__(output_dim, *args, **kwargs)
 
         self.middle_dim = middle_dim
-        #self.output_dim = output_dim
 
     def build(self, input_shape):
         assert len(input_shape) == 2
@@ -669,6 +669,16 @@ class FancyDense(Dense):
             self.set_weights(self.initial_weights)
             del self.initial_weights
 
+    def normalize_mask(self, mask):
+        if K.ndim(mask) == 2:
+            mask = K.expand_dims(K.all(mask, axis=1))
+        elif K.ndim(mask) == 3:
+            mask = K.expand_dims(K.all(mask, axis=(-1,-2)))
+        return K.cast(mask, K.floatx())
+
+    # imagine x either as (batch x feat) or (batch*time x feat)
+    # probably the second one
+    # in either case,
     def call(self, x, mask=None):
         out_W = K.permute_dimensions(self.fancy_W, (1,0))
         output = K.dot(K.dot(x, self.W), out_W)
@@ -694,6 +704,25 @@ class FancyDense(Dense):
                   'bias': self.bias}
         base_config = super(FancyDense, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+'''
+    
+
+    def compute_mask(self, x, mask=None):
+        return None
+
+    def call(self, x, mask=None):
+        if isinstance(x, list):
+            x, mask = x[0], K.not_equal(x[1], 0)
+        energy = K.squeeze(self.layer(x), 2)
+        p_matrix = softmax(energy)
+        if mask is not None:
+            mask = self.squash_mask(mask)
+            p_matrix = make_safe(p_matrix * mask)
+            p_matrix = (p_matrix / K.sum(p_matrix, axis=-1, keepdims=True))*mask
+        return p_matrix
+'''
 
 
 class DataLayer(Layer):

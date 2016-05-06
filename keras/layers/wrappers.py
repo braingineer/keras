@@ -107,13 +107,14 @@ class TimeDistributed(Wrapper):
         super(TimeDistributed, self).build()
 
     def compute_mask(self, x, mask=None):
+        return mask
         if mask is None:
             return None
         outmask = []
         for i in range(self.input_spec[0].shape[1]):
             mask_i = self.layer.compute_mask(x[:,i], mask[:,i])
             if mask_i is None:
-                return None
+                outmask.append(K.ones_like(mask[:,i]))
             else:
                 outmask.append(mask_i)
         outmask = K.pack(tuple(outmask))
@@ -137,7 +138,7 @@ class TimeDistributed(Wrapper):
 
     def call(self, X, mask=None):
         input_shape = self.input_spec[0].shape
-        if input_shape[0] and not self.force_reshape:
+        if input_shape[0] and not self.force_reshape and mask is None:
             # batch size matters, use rnn-based implementation
             def step(x, states):
                 output = self.layer.call(x)
@@ -151,14 +152,27 @@ class TimeDistributed(Wrapper):
             # to process batches of any size
             # we can go with reshape-based implementation for performance
             input_length = input_shape[1]
-            if not input_length:
-                input_length = K.shape(X)[1]
-            X = K.reshape(X, (-1, ) + input_shape[2:])  # (nb_samples * timesteps, ...)
-            y = self.layer.call(X)  # (nb_samples * timesteps, ...)
+            d_shape = (input_shape[0]*input_shape[1],) + input_shape[2:]
+
+            try:
+                if mask is not None:
+                    mask = K.reshape(safe_mask(mask, X), d_shape)
+            except:
+                import pdb
+                pdb.set_trace()
+
+            X = K.reshape(X, d_shape)  # (nb_samples * timesteps, ...)
+            y = self.layer.call(X, mask)  # (nb_samples * timesteps, ...)
             # (nb_samples, timesteps, ...)
             output_shape = self.get_output_shape_for(input_shape)
             y = K.reshape(y, (-1, input_length) + output_shape[2:])
         return y
 
+def safe_mask(mask, x):
+    if mask.ndim == x.ndim:
+        return K.cast(mask, K.floatx())
+    assert mask.ndim == x.ndim - 1
+    return K.ones_like(x)*K.cast(K.expand_dims(mask), K.floatx()) ## add 1 broadcastable to end
+    raise Exception("This should be impossible???")
 
 Distribute = TimeDistributed

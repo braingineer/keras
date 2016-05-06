@@ -423,6 +423,9 @@ def expand_dims(x, dim=-1):
     return x.dimshuffle(pattern)
 
 
+def addbroadcast(x, axis):
+    return T.addbroadcast(x, axis)
+
 def squeeze(x, axis):
     '''Remove a 1-dimension from the tensor at index "axis".
     '''
