@@ -136,6 +136,8 @@ class Embedding(Layer):
         else:
             W = self.W
         out = K.gather(W, x)
+        if self.mask_zero:
+            out *= K.expand_dims(self.compute_mask(x, mask)) + 1e-8 # for that numerical stability
         return out
 
     def get_config(self):

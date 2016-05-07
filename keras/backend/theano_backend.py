@@ -1006,7 +1006,6 @@ def dualsignal_rnn(step_function, inputs, initial_states, stack_indices,
                                             non_sequences=constants,
                                             go_backwards=go_backwards)     
 
-            htensor = htensor[-1]
             ctensor = ctensor[-1]   
 
         
