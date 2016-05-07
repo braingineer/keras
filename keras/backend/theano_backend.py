@@ -899,6 +899,194 @@ def stack_rnn(step_function, inputs, initial_states, stack_indices,
     outputs = outputs.dimshuffle(axes)
     return last_output, outputs, [T.squeeze(htensor), T.squeeze(ctensor)]
 
+
+
+
+def dualsignal_rnn(step_function, inputs, initial_states, stack_indices, 
+                                  go_backwards=False, 
+                                  mask=None, constants=None, unroll=False,
+                                  input_length=None):
+ 
+    ndim = inputs.ndim
+    assert ndim >= 3, 'Input should be at least 3D.'
+
+    axes = [1, 0] + list(range(2, ndim))
+    inputs = inputs.dimshuffle(axes)
+    stack_indices = stack_indices.dimshuffle([1,0])
+
+    if constants is None:
+        constants = []
+
+    if mask is not None:
+        if mask.ndim == ndim-1:
+            mask = expand_dims(mask)
+        assert mask.ndim == ndim
+        mask = mask.dimshuffle(axes)
+
+
+        if unroll:
+            indices = list(range(input_length))
+            if go_backwards:
+                indices = indices[::-1]
+
+            successive_outputs = []
+            state_tensors = initial_states
+            initial = [state0[0,:,:] for state0 in state_tensors]
+            batch_index = T.arange(state_tensors[0].shape[1])
+            prev_output = parent_state = None
+            for x_ind in indices:
+                p_ind = stack_indices[x_ind]
+                if parent_state is None:
+                    parent_state = initial
+                else:
+                    parent_state = [state_tensor[p_ind, batch_index] for state_tensor in state_tensors]
+                output, new_states = step_function(inputs[x_ind], parent_state + constants)
+
+                if prev_output is None:
+                    prev_output = zeros_like(output)
+                else:
+                    prev_output = successive_outputs[-1]
+
+                output = T.switch(mask[x_ind], output, prev_output)
+                kept_states = []
+                for i,(p_state, new_state) in enumerate(zip(parent_state, new_states)):
+                    state_tensors[i] = T.set_subtensor(state_tensors[i][x_ind], 
+                                                       T.switch(mask[x_ind], p_state, new_state))
+                #state_stack.append(kept_states)
+                successive_outputs.append(output)
+
+            outputs = T.stack(*successive_outputs)
+            htensor, ctensor = state_tensors
+            #states = []
+            #for i in range(len(state_stack[-1])):
+            #    states.append(T.stack(*[states_at_step[i] for states_at_step in state_stack]))
+        else:
+        
+            # build an all-zero tensor of shape (samples, output_dim)
+            init_states = [(s[0,:,:], s[0,:,:]) for s in initial_states]
+            initial_output = step_function(inputs[0], init_states + constants)[0] * 0
+            # Theano gets confused by broadcasting patterns in the scan op
+            initial_output = T.unbroadcast(initial_output, 0, 1)
+            def _step(input, mask, stack_index, iter_index, head_tm1, summary_tm1, 
+                                   h_tensor, c_tensor, hs_tm1, cs_tm1, *constants):
+                batch_index = T.arange(stack_index.shape[0])
+                hm1 = colgather(h_tensor, batch_index, stack_index) 
+                #hm1 = h_tensor[stack_index]
+                cm1 = colgather(c_tensor, batch_index, stack_index)
+                #cm1 = c_tensor[stack_index]
+                states = [(hm1, hs_tm1), (cm1, cs_tm1)]+list(constants)
+                head_out, [h, c] = step_function(input, states)
+                head_out = T.switch(mask, head_out, summary_tm1)
+
+                assert mask.ndim == h.ndim == c.ndim == hm1.ndim == cm1.ndim
+                h = T.switch(mask, h, hm1)
+                c = T.switch(mask, c, cm1)
+
+                s_states = [(hs_tm1, h), (cs_tm1, c)] + list(constants)
+                sum_out, [hs,cs] = step_function(input, s_states)
+                sum_out = T.switch(mask, sum_out, summary_tm1)
+                hs = T.switch(mask, hs, hs_tm1)
+                cs = T.switch(mask, cs, cs_tm1)
+                return [head_out, sum_out, T.set_subtensor(h_tensor[iter_index], h), 
+                                           T.set_subtensor(c_tensor[iter_index], c), 
+                                           hs, cs]
+
+            output_info = [initial_output, initial_output] # so we can retrieve the head_tm1 and summary_tm1
+            output_info += initial_states # so we can track the tree tensor
+            output_info += [s[0] for x in init_states]  # so we can get the  summary info
+
+            (tree_outputs, summary_outputs,
+             htensor, ctensor, hs, cs), _ = theano.scan(
+                                             _step,
+                                            sequences=[inputs, 
+                                                       mask, 
+                                                       stack_indices, 
+                                                       T.arange(inputs.shape[0])],
+                                            outputs_info=output_info,
+                                            non_sequences=constants,
+                                            go_backwards=go_backwards)     
+
+            htensor = htensor[-1]
+            ctensor = ctensor[-1]   
+
+        
+    else:
+
+        if unroll:
+            indices = list(range(input_length))
+            if go_backwards:
+                indices = indices[::-1]
+
+            successive_outputs = []
+            state_tensors = initial_states
+            initial = [state0[0,:,:] for state0 in state_tensors]
+            prev_output = parent_state = None
+            for x_ind in indices:
+                p_ind = stack_indices[x_ind]
+                if parent_state is None:
+                    parent_state = initial
+                else:
+                    parent_state = [state_tensor[p_ind] for state_tensor in state_tensors]
+                output, new_states = step_function(inputs[x_ind], parent_state + constants)
+
+                if prev_output is None:
+                    prev_output = zeros_like(output)
+                else:
+                    prev_output = successive_outputs[-1]
+
+                for i, state in enumerate(new_states):
+                    state_tensors[i] = T.set_subtensor(state_tensors[i][x_ind], state)
+
+                successive_outputs.append(output)
+
+            outputs = T.stack(*successive_outputs)
+            htensor, ctensor = state_tensors
+            #states = []
+            #for i in range(len(state_stack[-1])):
+            #    states.append(T.stack(*[states_at_step[i] for states_at_step in state_stack]))
+
+        else:
+            def _step(input, stack_index, iter_index, h_tensor, c_tensor, hs_tm1, cs_tm1, *constants):
+                batch_index = T.arange(stack_index.shape[0])
+                hm1 = colgather(h_tensor, batch_index, stack_index) 
+                cm1 = colgather(c_tensor, batch_index, stack_index)
+
+                # in the order of (me, other)
+                states = [(hm1, hs_tm1), (cm1, cs_tm1)]+list(constants)
+                head_out, [h, c] = step_function(input, states)
+
+                s_states = [(hs_tm1, h), (cs_tm1, c)] + list(constants)
+                sum_out, [hs,cs] = step_function(input, s_states)
+                
+                return [head_out, sum_out, T.set_subtensor(h_tensor[iter_index], h), 
+                                           T.set_subtensor(c_tensor[iter_index], c),
+                                           hs, cs]
+
+            output_info = [None, None]+initial_states + [x[0,:,:] for x in initial_states]
+            (tree_outputs, summary_outputs, 
+             htensor, ctensor, hc, cs), _ = theano.scan(
+                                                _step,
+                                                sequences=[inputs,
+                                                           stack_indices, 
+                                                           T.arange(inputs.shape[0])],
+                                                outputs_info=output_info,
+                                                non_sequences=constants,
+                                                go_backwards=go_backwards)     
+
+            htensor = htensor[-1]
+            ctensor = ctensor[-1]   
+
+
+    tree_outputs = T.squeeze(tree_outputs)
+    summary_outputs = T.squeeze(summary_outputs)
+    last_tree = tree_outputs[-1]
+    last_summary = summary_outputs[-1]
+    
+    axes = [1, 0] + list(range(2, tree_outputs.ndim))
+    tree_outputs = tree_outputs.dimshuffle(axes)
+    summary_outputs = summary_outputs.dimshuffle(axes)
+    return (last_tree, last_summary), (tree_outputs, summary_outputs), [T.squeeze(htensor), T.squeeze(ctensor)]
+
 def switch(condition, then_expression, else_expression):
     '''condition: scalar tensor.
     '''

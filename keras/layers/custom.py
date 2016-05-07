@@ -167,7 +167,10 @@ class DynamicEmbedding(Embedding):
             #out = K.gather(K.permute_dimensions(W, (1,0,2)), x).diagonal(axis1=0, axis2=3)
             #return K.permute_dimensions(out, (3,0,1,2))
             ### method above doesn't do grads =.=
-            out = K.gather(K.permute_dimensions(W, (1,0,2)), x)
+            # tensor abc goes to bac, indexed onto with xyz, goes to xyzac, 
+            # x == a, so shape to xayzc == xxyzc
+            # take diagonal on first two: xyzc 
+            out = K.gather(K.permute_dimensions(W, (1,0,2)), x) 
             out = K.permute_dimensions(out, (0,3,1,2,4))
             out = K.gather(out, (inds, inds))
             return out

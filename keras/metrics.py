@@ -1,8 +1,23 @@
 from . import backend as K
 from operator import mul
-import ikelos
-
 from .utils.generic_utils import get_from_module
+
+
+def normalize_mask(x, mask):
+    '''Keep the mask align wtih the tensor x
+
+    Arguments: x is a data tensor; mask is a binary tensor
+    Rationale: keep mask at same dimensionality as x, but only with a length-1 
+               trailing dimension. This ensures broadcastability, which is important
+               because inferring shapes is hard and shapes are easy to get wrong. 
+    '''
+    mask = K.cast(mask, K.floatx())
+    while K.ndim(mask) != K.ndim(x):
+        if K.ndim(mask) > K.ndim(x):
+            mask = K.any(mask, axis=-1)
+        elif K.ndim(mask) < K.ndim(x):
+            mask = K.expand_dims(mask)
+    return K.any(mask, axis=-1, keepdims=True)
 
 def binary_accuracy(y_true, y_pred, mask=None):
     return K.mean(K.equal(y_true, K.round(y_pred)))
@@ -10,7 +25,7 @@ def binary_accuracy(y_true, y_pred, mask=None):
 
 def categorical_accuracy(y_true, y_pred, mask=None):
     if mask is not None:
-        mask = ikelos.utils.normalize_mask(y_pred, mask)
+        mask = normalize_mask(y_pred, mask)
         eval_shape = (reduce(mul, K.shape(y_true)[:-1]), K.shape(y_true)[-1])
         y_true_flat = K.reshape(y_true, eval_shape)
         y_pred_flat = K.reshape(y_pred, eval_shape)

@@ -18,7 +18,6 @@ from .. import objectives
 from .. import metrics as metrics_module
 from ..utils.generic_utils import Progbar
 from .. import callbacks as cbks
-import ikelos
 
 
 def standardize_input_data(data, names, shapes=None, check_batch_dim=True,
