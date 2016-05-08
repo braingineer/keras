@@ -169,6 +169,7 @@ class DynamicEmbedding(Embedding):
             # tensor abc goes to bac, indexed onto with xyz, goes to xyzac, 
             # x == a, so shape to xayzc == xxyzc
             # take diagonal on first two: xyzc 
+            #out = K.colgather()
             out = K.gather(K.permute_dimensions(W, (1,0,2)), x) 
             out = K.permute_dimensions(out, (0,3,1,2,4))
             out = K.gather(out, (inds, inds))

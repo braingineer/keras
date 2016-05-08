@@ -437,6 +437,78 @@ class LearningRateScheduler(Callback):
         K.set_value(self.model.optimizer.lr, lr)
 
 
+class LRDecayViaLoss(Callback):
+    '''Save the model after every epoch.
+
+    `filepath` can contain named formatting options,
+    which will be filled the value of `epoch` and
+    keys in `logs` (passed in `on_epoch_end`).
+
+    For example: if `filepath` is `weights.{epoch:02d}-{val_loss:.2f}.hdf5`,
+    then multiple files will be save with the epoch number and
+    the validation loss.
+
+    # Arguments
+        filepath: string, path to save the model file.
+        monitor: quantity to monitor.
+        verbose: verbosity mode, 0 or 1.
+        save_best_only: if `save_best_only=True`,
+            the latest best model according to
+            the validation loss will not be overwritten.
+        mode: one of {auto, min, max}.
+            If `save_best_only=True`, the decision
+            to overwrite the current save file is made
+            based on either the maximization or the
+            minization of the monitored. For `val_acc`,
+            this should be `max`, for `val_loss` this should
+            be `min`, etc. In `auto` mode, the direction is
+            automatically inferred from the name of the monitored quantity.
+
+    '''
+    def __init__(self, monitor='val_loss', verbose=0,
+                 mode='auto'):
+
+        super(Callback, self).__init__()
+        self.monitor = monitor
+        self.verbose = verbose
+
+        if mode not in ['auto', 'min', 'max']:
+            warnings.warn('ModelCheckpoint mode %s is unknown, '
+                          'fallback to auto mode.' % (mode),
+                          RuntimeWarning)
+            mode = 'auto'
+
+        if mode == 'min':
+            self.monitor_op = np.less
+            self.best = np.Inf
+        elif mode == 'max':
+            self.monitor_op = np.greater
+            self.best = -np.Inf
+        else:
+            if 'acc' in self.monitor:
+                self.monitor_op = np.greater
+                self.best = -np.Inf
+            else:
+                self.monitor_op = np.less
+                self.best = np.Inf
+
+    def on_epoch_end(self, epoch, logs={}):
+        current = logs.get(self.monitor)
+        if current is None:
+            warnings.warn('Can save best model only with %s available, '
+                          'skipping.' % (self.monitor), RuntimeWarning)
+        else:
+            if self.monitor_op(current, self.best):
+                self.best = current
+            else:
+                assert hasattr(self.model.optimizer, 'lr'), \
+                    'Optimizer must have a "lr" attribute.'
+                lr = K.get_value(self.model.optimizer.lr) * 0.5
+                print("Model did not improve this round; reducing scores")
+                assert type(lr) == float, 'The output of the "schedule" function should be float.'
+                K.set_value(self.model.optimizer.lr, lr)
+
+
 class TensorBoard(Callback):
     ''' Tensorboard basic visualizations.
 
