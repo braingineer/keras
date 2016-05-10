@@ -409,6 +409,12 @@ def batch_flatten(x):
     x = T.reshape(x, (x.shape[0], T.prod(x.shape) // x.shape[0]))
     return x
 
+def tail_flatten(x):
+    '''turn an n-D tensor into a 2D tensor where
+    the last dimension is conserved.
+    '''
+    x = T.reshape(x, (T.prod(x.shape) // x.shape[-1], x.shape[-1]))
+    return x
 
 def expand_dims(x, dim=-1):
     '''Add a 1-sized dimension at index "dim".

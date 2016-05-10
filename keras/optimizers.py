@@ -407,7 +407,7 @@ class Adam(Optimizer):
                 c = constraints[p]
                 new_p = c(new_p)
             self.updates.append((p, new_p))
-        return self.updates, debugprints
+        return self.updates #, debugprints
 
     def get_config(self):
         return {"name": self.__class__.__name__,
