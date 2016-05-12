@@ -591,6 +591,10 @@ class Model(Container):
             name = self.output_names[i]
             self.targets.append(K.placeholder(ndim=len(shape), name=name + '_target'))
 
+        # prepare metrics
+        self.metrics_names = ['loss']
+        self.metrics = []
+
         # compute total loss
         total_loss = None
         for i in range(len(self.outputs)):
@@ -600,19 +604,20 @@ class Model(Container):
             sample_weight = sample_weights[i]
             mask = masks[i]
             loss_weight = loss_weights_list[i]
-            output_loss = loss_weight * weighted_loss(y_true, y_pred,
-                                                      sample_weight, mask)
+            output_loss = weighted_loss(y_true, y_pred,
+                                        sample_weight, mask)
+            if len(self.outputs) > 1:
+                self.metrics.append(output_loss)
+                self.metrics_names.append(self.output_names[i] + '_loss')
             if total_loss is None:
-                total_loss = output_loss
+                total_loss = loss_weight * output_loss
             else:
-                total_loss += output_loss
+                total_loss += loss_weight * output_loss
+
         # add regularization penalties to the loss
         for r in self.regularizers:
             total_loss = r(total_loss)
 
-        # prepare metrics
-        self.metrics_names = ['loss']
-        self.metrics = []
         # list of same size as output_names.
         # contains tuples (metrics for output, names of metrics)
         nested_metrics = collect_metrics(metrics, self.output_names)
@@ -718,10 +723,11 @@ class Model(Container):
                 inputs = filtered_in
             # returns network outputs. Does not update weights.
             # Does update the network states.
+            kwargs = getattr(self, '_function_kwargs', {})
             self.predict_function = K.function(inputs,
                                                self.outputs,
                                                updates=self.state_updates,
-                                               **self._function_kwargs)
+                                               **kwargs)
 
     def _fit_loop(self, f, ins, out_labels=[], batch_size=32,
                   nb_epoch=100, verbose=1, callbacks=[],
@@ -1413,7 +1419,7 @@ class Model(Container):
                                                class_weight=class_weight)
                 except Exception as e:
                     _stop.set()
-                    raise e
+                    raise
 
                 if type(outs) != list:
                     outs = [outs]
@@ -1515,7 +1521,7 @@ class Model(Container):
                 outs = self.test_on_batch(x, y, sample_weight=sample_weight)
             except Exception as e:
                 _stop.set()
-                raise e
+                raise
 
             if type(x) is list:
                 nb_samples = len(x[0])
@@ -1587,7 +1593,7 @@ class Model(Container):
                 outs = self.predict_on_batch(x)
             except Exception as e:
                 _stop.set()
-                raise e
+                raise
 
             if type(x) is list:
                 nb_samples = len(x[0])

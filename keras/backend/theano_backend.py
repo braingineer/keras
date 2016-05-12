@@ -3,6 +3,10 @@ from theano import tensor as T
 from theano.sandbox.rng_mrg import MRG_RandomStreams as RandomStreams
 from theano.tensor.signal import pool
 from theano.tensor.nnet import conv3d2d
+try:
+    from theano.tensor.nnet.nnet import softsign as T_softsign
+except ImportError:
+    from theano.sandbox.softsign import softsign as T_softsign
 import inspect
 import numpy as np
 from .common import _FLOATX, _EPSILON
@@ -312,6 +316,14 @@ def minimum(x, y):
     return T.minimum(x, y)
 
 
+def sin(x):
+    return T.sin(x)
+
+
+def cos(x):
+    return T.cos(x)
+
+
 # SHAPE OPERATIONS
 
 def concatenate(tensors, axis=-1):
@@ -531,6 +543,13 @@ def get_value(x):
         raise Exception("'get_value() can only be called on a variable. " +
                         "If you have an expression instead, use eval().")
     return x.get_value()
+
+
+def batch_get_value(xs):
+    '''Returns the value of more than one tensor variable,
+    as a list of Numpy arrays.
+    '''
+    return [get_value(x) for x in xs]
 
 
 def set_value(x, value):
@@ -1131,6 +1150,10 @@ def softplus(x):
     return T.nnet.softplus(x)
 
 
+def softsign(x):
+    return T_softsign(x)
+
+
 def categorical_crossentropy(output, target, from_logits=False):
     if from_logits:
         output = T.nnet.softmax(output)
@@ -1435,10 +1458,3 @@ def random_binomial(shape, p=0.0, dtype=_FLOATX, seed=None):
         seed = np.random.randint(10e6)
     rng = RandomStreams(seed=seed)
     return rng.binomial(shape, p=p, dtype=dtype)
-
-'''
-more TODO:
-
-tensordot -> soon to be introduced in TF
-batched_tensordot -> reimplement
-'''
