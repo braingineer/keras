@@ -67,20 +67,7 @@ def _fix_unknown_dimension(input_shape, output_shape):
 
     return tuple(output_shape)
 
-class DenseFork(MaxoutDense):
-    def __init__(self, output_dim, num_forks, *args, **kwargs):
-        if 'nb_features' in kwargs:
-            kwargs.pop('nb_features')
-        super(DenseFork, self).__init__(output_dim, nb_feature=num_forks, *args, **kwargs)
 
-    def get_output_shape_for(self, input_shape):
-        assert input_shape and len(input_shape) == 2
-        return (input_shape[0], input_shape[1], self.output_dim)
-
-    def call(self, x, mask=None):
-        # no activation, this layer is only linear.
-        output = K.dot(x, self.W) + self.b
-        return output
 
 
 class DynamicEmbedding(Embedding):
@@ -229,7 +216,20 @@ class MutualEnergy(Activation):
         return self.activation(energy)
 
 
+class DenseFork(MaxoutDense):
+    def __init__(self, output_dim, num_forks, *args, **kwargs):
+        if 'nb_features' in kwargs:
+            kwargs.pop('nb_features')
+        super(DenseFork, self).__init__(output_dim, nb_feature=num_forks, *args, **kwargs)
 
+    def get_output_shape_for(self, input_shape):
+        assert input_shape and len(input_shape) == 2
+        return (input_shape[0], input_shape[1], self.output_dim)
+
+    def call(self, x, mask=None):
+        # no activation, this layer is only linear.
+        output = K.dot(x, self.W) + self.b
+        return output
 
 
 

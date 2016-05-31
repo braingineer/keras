@@ -286,6 +286,7 @@ class Convolution2D(Layer):
         super(Convolution2D, self).__init__(**kwargs)
 
     def build(self, input_shape):
+        print("inside build for ", self.name+", with input shape", input_shape)
         if self.dim_ordering == 'th':
             stack_size = input_shape[1]
             self.W_shape = (self.nb_filter, stack_size, self.nb_row, self.nb_col)

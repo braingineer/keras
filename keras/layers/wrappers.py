@@ -107,9 +107,20 @@ class TimeDistributed(Wrapper):
         super(TimeDistributed, self).build()
 
     def compute_mask(self, x, mask=None):
-        return mask
         if mask is None:
             return None
+
+        input_shape = self.input_spec[0].shape
+        m_shape = (input_shape[0]*input_shape[1],) + tuple(K.shape(mask)[2:])
+        d_shape = (input_shape[0]*input_shape[1],) + input_shape[2:]
+        new_mask = self.layer.compute_mask(K.reshape(x, d_shape), K.reshape(mask, m_shape, ndim=K.ndim(mask)-1))
+        if new_mask is None:
+            return None
+        out_shape = (input_shape[0], input_shape[1],) + tuple(K.shape(new_mask)[1:])
+        out_mask = K.reshape(new_mask, out_shape, ndim=K.ndim(new_mask)+1)
+        return out_mask
+
+        '''
         outmask = []
         for i in range(self.input_spec[0].shape[1]):
             mask_i = self.layer.compute_mask(x[:,i], mask[:,i])
@@ -129,6 +140,8 @@ class TimeDistributed(Wrapper):
             import pdb
             pdb.set_trace()
         return outmask
+        '''
+
 
     def get_output_shape_for(self, input_shape):
         child_input_shape = (input_shape[0],) + input_shape[2:]

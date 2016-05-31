@@ -267,7 +267,7 @@ def abs(x):
 
 
 def sqrt(x):
-    x = T.clip(x, 0., np.inf)
+    x = T.clip(x, 0., 10**10.)
     return T.sqrt(x)
 
 
@@ -330,8 +330,8 @@ def concatenate(tensors, axis=-1):
     return T.concatenate(tensors, axis=axis)
 
 
-def reshape(x, shape):
-    return T.reshape(x, shape)
+def reshape(x, shape, ndim=None):
+    return T.reshape(x, shape, ndim)
 
 
 def permute_dimensions(x, pattern):
@@ -814,7 +814,7 @@ def stack_rnn(step_function, inputs, initial_states, stack_indices,
                 #state_stack.append(kept_states)
                 successive_outputs.append(output)
 
-            outputs = T.stack(*successive_outputs)
+            outputs = T.stack(*successive_outputs) 
             htensor, ctensor = state_tensors
             #states = []
             #for i in range(len(state_stack[-1])):

@@ -199,9 +199,10 @@ class ProgbarLogger(Callback):
 class ProgbarV2(ProgbarLogger):
     '''Callback that prints metrics to stdout.
     '''
-    def __init__(self, update_frequency=1, progbar_width=30):
+    def __init__(self, update_frequency=1, progbar_width=30, replacers=None):
         self.update_frequency = update_frequency
         self.progbar_width = progbar_width
+        self.replacers = replacers or {}
         
     def on_epoch_begin(self, epoch, logs={}):
         if self.verbose:
@@ -217,7 +218,12 @@ class ProgbarV2(ProgbarLogger):
 
         for k in self.params['metrics']:
             if k in logs:
-                self.log_values.append((k, logs[k]))
+                kpart, end = "_".join(k.split("_")[:-1]), k.split("_")[-1]
+                if kpart in self.replacers:
+                    k_ = self.replacers[kpart] + "_" + end
+                else:
+                    k_ = k                    
+                self.log_values.append((k_, logs[k]))
 
         # skip progbar update for the last batch;
         # will be handled by on_epoch_end

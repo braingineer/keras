@@ -94,16 +94,33 @@ class Progbar(object):
                 info += ' - ETA: %ds' % eta
             else:
                 info += ' - %ds' % (now - self.start)
+            aggregate = {}
             for k in self.unique_values:
-                info += ' - %s:' % k
+                if len(k.split("_")) > 1:
+                    k_, end = '_'.join(k.split("_")[:-1]), k.split("_")[-1]
+                else:
+                    k_, end = k, ''
+
+                #info += ' - %s:' % k
                 if type(self.sum_values[k]) is list:
                     avg = self.sum_values[k][0] / max(1, self.sum_values[k][1])
                     if abs(avg) > 1e-3:
-                        info += ' %.4f' % avg
+                        valstr = '%.4f' % avg
+                        #info += ' %.4f' % avg
                     else:
-                        info += ' %.4e' % avg
+                        valstr = '%.4e' % avg
+                        #info += ' %.4e' % avg
                 else:
-                    info += ' %s' % self.sum_values[k]
+                    valstr = ' %s' % self.sum_values[k]
+                    #info += ' %s' % self.sum_values[k]
+                aggregate.setdefault(k_, []).append((end, valstr))
+            for k, vals in aggregate.items():
+                if len(vals) > 1:
+                    endstr = '/'.join([x[0] for x in vals])
+                    valstr = '/'.join([x[1] for x in vals])
+                    info += ' - %s(%s): %s' % (k, endstr, valstr)
+                else:
+                    info += ' - %s: %s' % (k+"_"+vals[0][0], vals[0][1])
 
             self.total_width += len(info)
             if prev_total_width > self.total_width:
