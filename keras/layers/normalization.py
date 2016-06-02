@@ -59,7 +59,11 @@ class BatchNormalization(Layer):
         self.momentum = momentum
         self.initial_weights = weights
         self.uses_learning_phase = True
+        self.supports_masking = True
         super(BatchNormalization, self).__init__(**kwargs)
+
+    def compute_mask(self, x, mask=None):
+        return mask
 
     def build(self, input_shape):
         self.input_spec = [InputSpec(shape=input_shape)]

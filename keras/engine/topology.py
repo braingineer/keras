@@ -1217,6 +1217,7 @@ class Merge(Layer):
             return K.concatenate(inputs, axis=self.concat_axis)
 
         elif self.mode == 'mul':
+            # better: s = reduce(operation.mul, inputs)
             s = inputs[0]
             for i in range(1, len(inputs)):
                 s *= inputs[i]
