@@ -91,7 +91,7 @@ class BatchNormalization(Layer):
         if self.initial_weights is not None:
             self.set_weights(self.initial_weights)
             del self.initial_weights
-        self.built = True
+        #self.built = True
         self.called_with = None
 
     def call(self, x, mask=None):

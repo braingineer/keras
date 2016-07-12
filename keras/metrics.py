@@ -2,7 +2,7 @@ import numpy as np
 from . import backend as K
 from operator import mul
 from .utils.generic_utils import get_from_module
-
+from functools import reduce
 
 def normalize_mask(x, mask):
     '''Keep the mask align wtih the tensor x

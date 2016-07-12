@@ -11,6 +11,7 @@ import inspect
 import numpy as np
 from .common import _FLOATX, _EPSILON
 
+theano.config.compute_test_value = 'off'
 
 # INTERNAL UTILS
 theano.config.floatX = _FLOATX
@@ -1113,6 +1114,164 @@ def dualsignal_rnn(step_function, inputs, initial_states, stack_indices,
     tree_outputs = tree_outputs.dimshuffle(axes)
     summary_outputs = summary_outputs.dimshuffle(axes)
     return (last_tree, last_summary), (tree_outputs, summary_outputs), [T.squeeze(htensor), T.squeeze(ctensor)]
+
+
+def rttn(step_function, inputs, initial_states, tree_topology, action_types, 
+                                horizon, shape_key, context_matrix, 
+                                mask=None, constants=None, **kwargs):
+ 
+    assert inputs.ndim >= 3, 'Input should be at least 3D.'
+
+    horizon_words, horizon_indices = horizon
+
+    _shuffle = lambda tensor: tensor.dimshuffle([1,0]+list(range(2,tensor.ndim))) 
+    inputs = _shuffle(inputs)
+    tree_topology = _shuffle(tree_topology)
+    action_types = _shuffle(action_types)
+    horizon_words = _shuffle(horizon_words) # all words on horizon
+    horizon_indices = _shuffle(horizon_indices) # all of their branch indices
+
+
+    if constants is None:
+        constants = []
+
+    if mask is not None:
+        if mask.ndim == inputs.ndim-1:
+            mask = expand_dims(mask)
+        assert mask.ndim == inputs.ndim
+        mask = _shuffle(mask)
+
+        def _step(iter_index, x_input, x_mask, x_type, x_topology, 
+                              horizon_words, horizon_indices, 
+                              h_traverse, branch_tensor, W_ctx, *constants):
+            '''Notes for this function:
+               W_ctx is passed in under non sequences but is separated here from the constants
+            '''
+            ### topology
+            batch_index = T.arange(x_topology.shape[0])
+            h_parent = colgather(branch_tensor, batch_index, x_topology)
+            states = (h_parent, h_traverse, x_type) + constants
+            h_child, h_vplus = step_function(x_input, states)
+            ## is masking necessary for branches? idk.
+            h_child = T.switch(x_mask, h_child, h_parent)
+            h_vplus = T.switch(x_mask, h_vplus, h_traverse)
+
+            branch_tensor = T.set_subtensor(branch_tensor[iter_index], h_child)
+
+
+            ### shape sizes
+            s_batch = shape_key['batch']
+            s_rnn = shape_key['rnn'] 
+            s_word = shape_key['word']
+            s_rnn_word = s_rnn + s_word
+
+            # ctx is used as an attentional vector over the horizon states
+            # W_ctx is (R, RW), h_vplus is (B, R); horizont_types is (B,)
+            # horizon_types lets different tree actions be considered
+            ctx = T.dot(h_vplus, W_ctx)
+            
+            ctx_shape = (s_batch, 1, s_rnn_word)
+            ctx = T.reshape(ctx, ctx_shape)
+            T.addbroadcast(ctx, 1)
+
+            # horizon state is (B, HorizonSize, RNNWORD)
+            branch_owners = branch_tensor[horizon_indices, T.arange(s_batch).reshape((s_batch, 1))]
+            #branch_owners = branch_tensor[T.arange(s_batch), horizon_indices] # indexes into the branches
+            horizon_state = T.concatenate([branch_owners, horizon_words], axis=-1) 
+            
+            # now create the probability tensor
+            p_horizon = horizon_state * ctx  # elemwise multiplying
+            p_horizon = T.sum(p_horizon, axis=-1) #then summing. 
+            #this was basically a dot, but per batch row and resulting in a dim reduction
+            # now, given (B,Horizon), we can get a softmax distribution per row
+            p_horizon = T.nnet.softmax(p_horizon)
+            # note, this means we can also sample if we want to do a dynamic oracle. 
+            
+            return h_vplus, branch_tensor, horizon_state, p_horizon
+
+        output_info = initial_states + [None, None]
+        
+        (h_v, branch_tensor, 
+         horizon_states, p_horizons), _ = theano.scan(
+                                                 _step,
+                                                sequences=[T.arange(inputs.shape[0]), 
+                                                           inputs, 
+                                                           mask, 
+                                                           action_types,
+                                                           tree_topology, 
+                                                           horizon_words, 
+                                                           horizon_indices],
+                                                outputs_info=output_info,
+                                                non_sequences=[context_matrix] + constants)     
+        branch_tensor = branch_tensor[-1]
+        
+    else:
+
+        def _step(iter_index, x_input, x_type, x_topology, 
+                              horizon_words, horizon_indices, 
+                              h_traverse, branch_tensor, W_ctx, *constants):
+            '''Notes for this function:
+               W_ctx is passed in under non sequences but is separated here from the constants
+            '''
+            ### topology
+            batch_index = T.arange(x_topology.shape[0])
+            h_parent = colgather(branch_tensor, batch_index, x_topology)
+            states = (h_parent, h_traverse, x_type) + constants
+            h_child, h_vplus = step_function(x_input, states)
+            
+            branch_tensor = T.set_subtensor(branch_tensor[iter_index], h_child)
+            
+            ### shape sizes
+            s_batch = shape_key['batch']
+            s_rnn = shape_key['rnn'] 
+            s_word = shape_key['word']
+            s_rnn_word = s_rnn + s_word
+
+            # ctx is used as an attentional vector over the horizon states
+            # W_ctx is (4, R, RW), h_vplus is (B, R); horizont_types is (B,)
+            # horizon_types lets different tree actions be considered
+            ctx = T.dot(h_vplus, W_ctx)
+            ctx = T.addbroadcast(T.reshape(ctx, (s_batch, 1, s_rnn_word)), 1)
+
+            # horizon state is (B, HorizonSize, s_rnn_word)
+            branch_owners = branch_tensor[T.arange(s_batch), horizon_indices] # indexes into the branches
+            horizon_state = T.concatenate([branch_owners, horizon_words], axis=-1) 
+            
+            # now create the probability tensor
+            p_horizon = horizon_state * ctx  # elemwise multiplying
+            p_horizon = T.sum(p_horizon, axis=-1) #then summing. 
+            #this was basically a dot, but per batch row and resulting in a dim reduction
+            # now, given (B,Horizon), we can get a softmax distribution per row
+            p_horizon = T.nnet.softmax(p_horizon) # b, horizon
+            #p_horizon = T.addbroadcast(T.reshape(p_horizon, (s_batch, s_horizon, 1)), 1)
+            # note, this means we can also sample if we want to do a dynamic oracle. 
+            #horizon_attn = T.sum(p_horizon * horizon_state, axis=1)
+            
+            
+            return h_vplus, branch_tensor, horizon_state, p_horizon
+
+        output_info = initial_states + [None, None]
+        
+        (h_v, branch_tensor, 
+         horizon_states, p_horizons), _ = theano.scan(
+                                                 _step,
+                                                sequences=[T.arange(inputs.shape[0]), 
+                                                           inputs, 
+                                                           action_types,
+                                                           tree_topology, 
+                                                           horizon_words, 
+                                                           horizon_indices],
+                                                outputs_info=output_info,
+                                                non_sequences=[context_matrix] + constants)     
+        branch_tensor = branch_tensor[-1]
+    
+    unshuffle = lambda tensor: T.squeeze(tensor).dimshuffle([1, 0] + list(range(2, tensor.ndim)))
+    h_v = unshuffle(h_v)
+    branch_tensor = unshuffle(branch_tensor)
+    horizon_states = unshuffle(horizon_states)
+    p_horizons = unshuffle(p_horizons)
+
+    return branch_tensor, h_v, horizon_states, p_horizons
 
 def switch(condition, then_expression, else_expression):
     '''condition: scalar tensor.

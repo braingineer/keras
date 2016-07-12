@@ -12,6 +12,7 @@ from .common import cast_to_floatx
 from .common import image_dim_ordering
 from .common import set_image_dim_ordering
 
+
 _keras_base_dir = os.path.expanduser('~')
 if not os.access(_keras_base_dir, os.W_OK):
     _keras_base_dir = '/tmp'

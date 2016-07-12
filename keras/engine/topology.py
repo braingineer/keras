@@ -2391,7 +2391,8 @@ class Container(Layer):
             flattened_layers = self.flattened_layers
         else:
             flattened_layers = self.layers
-
+            
+            
         if 'nb_layers' in f.attrs:
             # legacy format
             nb_layers = f.attrs['nb_layers']
