@@ -54,7 +54,7 @@ class Recurrent(Layer):
         # as the first layer in a Sequential model
         model = Sequential()
         model.add(LSTM(32, input_shape=(10, 64)))
-        # now model.output_shape == (None, 10, 32)
+        # now model.output_shape == (None, 32)
         # note: `None` is the batch dimension.
 
         # the following is identical:
@@ -190,9 +190,9 @@ class Recurrent(Layer):
     def get_initial_states(self, x):
         # build an all-zero tensor of shape (samples, output_dim)
         initial_state = K.zeros_like(x)  # (samples, timesteps, input_dim)
-        initial_state = K.sum(initial_state, axis=1)  # (samples, input_dim)
-        reducer = K.zeros((self.input_dim, self.output_dim))
-        initial_state = K.dot(initial_state, reducer)  # (samples, output_dim)
+        initial_state = K.sum(initial_state, axis=(1, 2))  # (samples,)
+        initial_state = K.expand_dims(initial_state)  # (samples, 1)
+        initial_state = K.tile(initial_state, [1, self.output_dim])  # (samples, output_dim)
         initial_states = [initial_state for _ in range(len(self.states))]
         return initial_states
 
