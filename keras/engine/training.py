@@ -330,12 +330,12 @@ def weighted_objective(fn):
             if mask.ndim == score_array.ndim - 1:
                 mask = K.expand_dims(mask)
             elif mask.ndim == score_array.ndim + 1:
-                mask = K.any(mask, axis=-1) #any or all? 
+                mask = K.all(mask, axis=-1) #any or all? 
             score_array *= mask
             #  the loss per batch should be proportional
             #  to the number of unmasked samples.
             score_array /= K.mean(mask)
-        score_array = fn(y_true, y_pred)
+        #score_array = fn(y_true, y_pred)
        
 
         # reduce score_array to same ndim as weight array

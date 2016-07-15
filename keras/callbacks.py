@@ -278,13 +278,14 @@ class ModelCheckpoint(Callback):
 
     '''
     def __init__(self, filepath, monitor='val_loss', verbose=0,
-                 save_best_only=False, mode='auto'):
+                 save_best_only=False, mode='auto', save_many=False):
 
         super(ModelCheckpoint, self).__init__()
         self.monitor = monitor
         self.verbose = verbose
         self.filepath = filepath
         self.save_best_only = save_best_only
+        self.save_many = save_many
 
         if mode not in ['auto', 'min', 'max']:
             warnings.warn('ModelCheckpoint mode %s is unknown, '
@@ -327,6 +328,15 @@ class ModelCheckpoint(Callback):
                         print('Epoch %05d: %s did not improve' %
                               (epoch, self.monitor))
         else:
+            if self.save_many:
+                if "{}" in filepath:
+                    filepath = filepath.format(epoch)
+                elif ".h5" in filepath:
+                    filepath = filepath.replace(".h5", str(epoch)+".h5")
+                else:
+                    part1 = '.'.join(filepath.split(".")[:-1])
+                    part2 = "."+filepath.split(".")[-1]
+                    filepath = part1+str(epoch)+part2
             if self.verbose > 0:
                 print('Epoch %05d: saving model to %s' % (epoch, filepath))
             self.model.save_weights(filepath, overwrite=True)

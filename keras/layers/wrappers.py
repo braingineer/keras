@@ -115,7 +115,10 @@ class TimeDistributed(Wrapper):
         d_shape = (input_shape[0]*input_shape[1],) + input_shape[2:]
         new_mask = self.layer.compute_mask(K.reshape(x, d_shape), K.reshape(mask, m_shape, ndim=K.ndim(mask)-1))
         if new_mask is None:
-            return None
+
+            axes = tuple(range(2, K.ndim(mask)))
+            return K.any(mask, axes)
+            
         out_shape = (input_shape[0], input_shape[1],) + tuple(K.shape(new_mask)[1:])
         out_mask = K.reshape(new_mask, out_shape, ndim=K.ndim(new_mask)+1)
         return out_mask
