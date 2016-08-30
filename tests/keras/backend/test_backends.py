@@ -38,6 +38,7 @@ def check_two_tensor_operation(function_name, x_input_shape,
     assert zth.shape == ztf.shape
     assert_allclose(zth, ztf, atol=1e-05)
 
+
 def check_composed_tensor_operations(first_function_name, first_function_args,
                                      second_function_name, second_function_args,
                                      input_shape):
@@ -57,7 +58,8 @@ def check_composed_tensor_operations(first_function_name, first_function_args,
     ztf = KTF.eval(getattr(KTF, second_function_name)(ytf, **second_function_args))
 
     assert zth.shape == ztf.shape
-    assert_allclose(zth, ztf, atol=1e-05)   
+    assert_allclose(zth, ztf, atol=1e-05)
+
 
 class TestBackend(object):
 
@@ -68,6 +70,8 @@ class TestBackend(object):
         check_two_tensor_operation('batch_dot', (4, 2, 3), (4, 5, 3),
                                    axes=(2, 2))
         check_single_tensor_operation('transpose', (4, 2))
+        check_single_tensor_operation('reverse', (4, 3, 2), axes=1)
+        check_single_tensor_operation('reverse', (4, 3, 2), axes=(1, 2))
 
     def test_shape_operations(self):
         # concatenate
@@ -90,14 +94,15 @@ class TestBackend(object):
         check_single_tensor_operation('expand_dims', (4, 3), dim=-1)
         check_single_tensor_operation('expand_dims', (4, 3, 2), dim=1)
         check_single_tensor_operation('squeeze', (4, 3, 1), axis=2)
-        check_composed_tensor_operations('reshape', {'shape':(4,3,1,1)}, 
-                                         'squeeze', {'axis':2}, 
+        check_single_tensor_operation('squeeze', (4, 1, 1), axis=1)
+        check_composed_tensor_operations('reshape', {'shape': (4, 3, 1, 1)},
+                                         'squeeze', {'axis': 2},
                                          (4, 3, 1, 1))
 
     def test_repeat_elements(self):
         reps = 3
         for ndims in [1, 2, 3]:
-            shape = np.arange(2, 2+ndims)
+            shape = np.arange(2, 2 + ndims)
             arr = np.arange(np.prod(shape)).reshape(shape)
             arr_th = KTH.variable(arr)
             arr_tf = KTF.variable(arr)
@@ -149,6 +154,17 @@ class TestBackend(object):
         # count_params
         assert KTH.count_params(xth) == KTF.count_params(xtf)
 
+        # print_tensor
+        check_single_tensor_operation('print_tensor', ())
+        check_single_tensor_operation('print_tensor', (2,))
+        check_single_tensor_operation('print_tensor', (4, 3))
+        check_single_tensor_operation('print_tensor', (1, 2, 3))
+
+        val = np.random.random((3, 2))
+        xth = KTH.variable(val)
+        xtf = KTF.variable(val)
+        assert KTH.get_variable_shape(xth) == KTF.get_variable_shape(xtf)
+
     def test_elementwise_operations(self):
         check_single_tensor_operation('max', (4, 2))
         check_single_tensor_operation('max', (4, 2), axis=1, keepdims=True)
@@ -196,6 +212,11 @@ class TestBackend(object):
 
         # two-tensor ops
         check_two_tensor_operation('equal', (4, 2), (4, 2))
+        check_two_tensor_operation('not_equal', (4, 2), (4, 2))
+        check_two_tensor_operation('greater', (4, 2), (4, 2))
+        check_two_tensor_operation('greater_equal', (4, 2), (4, 2))
+        check_two_tensor_operation('lesser', (4, 2), (4, 2))
+        check_two_tensor_operation('lesser_equal', (4, 2), (4, 2))
         check_two_tensor_operation('maximum', (4, 2), (4, 2))
         check_two_tensor_operation('minimum', (4, 2), (4, 2))
 
@@ -208,14 +229,24 @@ class TestBackend(object):
         exptf = xtf * KTF.exp(xtf)
         lossth = KTH.sum(expth)
         losstf = KTF.sum(exptf)
+        zero_lossth = KTH.stop_gradient(lossth)
+        zero_losstf = KTF.stop_gradient(losstf)
 
         gradth = KTH.gradients(lossth, [expth])
         gradtf = KTF.gradients(losstf, [exptf])
+        zero_gradth = KTH.gradients(lossth + zero_lossth, [expth])
+        zero_gradtf = KTF.gradients(losstf + zero_losstf, [exptf])
 
         zth = KTH.eval(gradth[0])
         ztf = KTF.eval(gradtf[0])
+        zero_zth = KTH.eval(zero_gradth[0])
+        zero_ztf = KTF.eval(zero_gradtf[0])
         assert zth.shape == ztf.shape
+        assert zero_zth.shape == zero_ztf.shape
         assert_allclose(zth, ztf, atol=1e-05)
+        assert_allclose(zero_zth, zero_ztf, atol=1e-05)
+        assert_allclose(zero_zth, zth, atol=1e-05)
+        assert_allclose(zero_ztf, ztf, atol=1e-05)
 
     def test_function(self):
         val = np.random.random((4, 2))
@@ -266,6 +297,7 @@ class TestBackend(object):
                 return output, [output]
             return step_function
 
+        # test default setup
         th_rnn_step_fn = rnn_step_fn(input_dim, output_dim, KTH)
         th_inputs = KTH.variable(input_val)
         th_initial_states = [KTH.variable(init_state_val)]
@@ -310,6 +342,35 @@ class TestBackend(object):
         assert_allclose(th_last_output, unrolled_th_last_output, atol=1e-04)
         assert_allclose(th_outputs, unrolled_th_outputs, atol=1e-04)
         assert_allclose(th_state, unrolled_th_state, atol=1e-04)
+
+        # test go_backwards
+        th_rnn_step_fn = rnn_step_fn(input_dim, output_dim, KTH)
+        th_inputs = KTH.variable(input_val)
+        th_initial_states = [KTH.variable(init_state_val)]
+        last_output, outputs, new_states = KTH.rnn(th_rnn_step_fn, th_inputs,
+                                                   th_initial_states,
+                                                   go_backwards=True,
+                                                   mask=None)
+        th_last_output = KTH.eval(last_output)
+        th_outputs = KTH.eval(outputs)
+        assert len(new_states) == 1
+        th_state = KTH.eval(new_states[0])
+
+        tf_rnn_step_fn = rnn_step_fn(input_dim, output_dim, KTF)
+        tf_inputs = KTF.variable(input_val)
+        tf_initial_states = [KTF.variable(init_state_val)]
+        last_output, outputs, new_states = KTF.rnn(tf_rnn_step_fn, tf_inputs,
+                                                   tf_initial_states,
+                                                   go_backwards=True,
+                                                   mask=None)
+        tf_last_output = KTF.eval(last_output)
+        tf_outputs = KTF.eval(outputs)
+        assert len(new_states) == 1
+        tf_state = KTF.eval(new_states[0])
+
+        assert_allclose(tf_last_output, th_last_output, atol=1e-04)
+        assert_allclose(tf_outputs, th_outputs, atol=1e-04)
+        assert_allclose(tf_state, th_state, atol=1e-04)
 
         # test unroll with backwards = True
         bwd_last_output, bwd_outputs, bwd_new_states = KTH.rnn(
@@ -556,6 +617,58 @@ class TestBackend(object):
         assert(np.abs(np.mean(rand) - p) < 0.01)
         assert(np.max(rand) == 1)
         assert(np.min(rand) == 0)
+
+    def test_ctc(self):
+        # simplified version of TensorFlow's test
+
+        label_lens = np.expand_dims(np.asarray([5, 4]), 1)
+        input_lens = np.expand_dims(np.asarray([5, 5]), 1)  # number of timesteps
+
+        # the Theano and Tensorflow CTC code use different methods to ensure
+        # numerical stability.  The Theano code subtracts out the max
+        # before the final log, so the results are different but scale
+        # identically and still train properly
+        loss_log_probs_tf = [3.34211, 5.42262]
+        loss_log_probs_th = [1.73308, 3.81351]
+
+        # dimensions are batch x time x categories
+        labels = np.asarray([[0, 1, 2, 1, 0], [0, 1, 1, 0, -1]])
+        inputs = np.asarray(
+            [[[0.633766, 0.221185, 0.0917319, 0.0129757, 0.0142857, 0.0260553],
+              [0.111121, 0.588392, 0.278779, 0.0055756, 0.00569609, 0.010436],
+              [0.0357786, 0.633813, 0.321418, 0.00249248, 0.00272882, 0.0037688],
+              [0.0663296, 0.643849, 0.280111, 0.00283995, 0.0035545, 0.00331533],
+              [0.458235, 0.396634, 0.123377, 0.00648837, 0.00903441, 0.00623107]],
+             [[0.30176, 0.28562, 0.0831517, 0.0862751, 0.0816851, 0.161508],
+              [0.24082, 0.397533, 0.0557226, 0.0546814, 0.0557528, 0.19549],
+              [0.230246, 0.450868, 0.0389607, 0.038309, 0.0391602, 0.202456],
+              [0.280884, 0.429522, 0.0326593, 0.0339046, 0.0326856, 0.190345],
+              [0.423286, 0.315517, 0.0338439, 0.0393744, 0.0339315, 0.154046]]],
+            dtype=np.float32)
+
+        labels_tf = KTF.variable(labels, dtype="int32")
+        inputs_tf = KTF.variable(inputs, dtype="float32")
+        input_lens_tf = KTF.variable(input_lens, dtype="int32")
+        label_lens_tf = KTF.variable(label_lens, dtype="int32")
+        res = KTF.eval(KTF.ctc_batch_cost(labels_tf, inputs_tf, input_lens_tf, label_lens_tf))
+        assert_allclose(res[:, 0], loss_log_probs_tf, atol=1e-05)
+
+        labels_th = KTH.variable(labels, dtype="int32")
+        inputs_th = KTH.variable(inputs, dtype="float32")
+        input_lens_th = KTH.variable(input_lens, dtype="int32")
+        label_lens_th = KTH.variable(label_lens, dtype="int32")
+        res = KTH.eval(KTH.ctc_batch_cost(labels_th, inputs_th, input_lens_th, label_lens_th))
+        assert_allclose(res[0, :], loss_log_probs_th, atol=1e-05)
+
+    def test_one_hot(self):
+        input_length = 10
+        nb_classes = 20
+        batch_size = 30
+        indices = np.random.randint(0, nb_classes, size=(batch_size, input_length))
+        oh = np.eye(nb_classes)[indices]
+        for K in [KTH, KTF]:
+            koh = K.eval(K.one_hot(K.variable(indices, dtype='int32'), nb_classes))
+            assert np.all(koh == oh)
 
 
 if __name__ == '__main__':
