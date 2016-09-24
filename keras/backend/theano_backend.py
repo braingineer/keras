@@ -5,12 +5,17 @@ from theano.tensor.signal import pool
 from theano.tensor.nnet import conv3d2d
 from theano.printing import Print
 try:
+    import theano.sparse as th_sparse_module
+except ImportError:
+    th_sparse_module = None
+try:
     from theano.tensor.nnet.nnet import softsign as T_softsign
 except ImportError:
     from theano.sandbox.softsign import softsign as T_softsign
 import inspect
 import numpy as np
 from .common import _FLOATX, _EPSILON, _IMAGE_DIM_ORDERING
+py_all = all
 
 theano.config.compute_test_value = 'off'
 
@@ -31,17 +36,38 @@ def set_learning_phase(value):
                          '0 or 1.')
     _LEARNING_PHASE = value
 
-
 # VARIABLE MANIPULATION
+
+
+def _assert_sparse_module():
+    if not th_sparse_module:
+        raise ImportError("Failed to import theano.sparse\n"
+                          "You probably need to pip install nose-parameterized")
+
+
+def is_sparse(tensor):
+    return th_sparse_module and isinstance(tensor.type, th_sparse_module.SparseType)
+
+
+def to_dense(tensor):
+    if is_sparse(tensor):
+        return th_sparse_module.dense_from_sparse(tensor)
+    else:
+        return tensor
+
 
 def variable(value, dtype=_FLOATX, name=None):
     '''Instantiate a tensor variable.
     '''
-    value = np.asarray(value, dtype=dtype)
-    return theano.shared(value=value, name=name, strict=False)
+    if hasattr(value, 'tocoo'):
+        _assert_sparse_module()
+        return th_sparse_module.as_sparse_variable(value)
+    else:
+        value = np.asarray(value, dtype=dtype)
+        return theano.shared(value=value, name=name, strict=False)
 
 
-def placeholder(shape=None, ndim=None, dtype=_FLOATX, name=None):
+def placeholder(shape=None, ndim=None, dtype=_FLOATX, sparse=False, name=None):
     '''Instantiate an input data placeholder variable.
     '''
     if shape is None and ndim is None:
@@ -52,7 +78,11 @@ def placeholder(shape=None, ndim=None, dtype=_FLOATX, name=None):
         shape = tuple([None for _ in range(ndim)])
 
     broadcast = (False,) * ndim
-    x = T.TensorType(dtype, broadcast)(name)
+    if sparse:
+        _assert_sparse_module()
+        x = th_sparse_module.csr_matrix(name=name, dtype=dtype)
+    else:
+        x = T.TensorType(dtype, broadcast)(name)
     x._keras_shape = shape
     x._uses_learning_phase = False
     return x
@@ -77,7 +107,7 @@ def dtype(x):
 def eval(x):
     '''Run a graph.
     '''
-    return x.eval()
+    return to_dense(x).eval()
 
 
 def zeros(shape, dtype=_FLOATX, name=None):
@@ -156,7 +186,10 @@ Assumed overridden:
 
 
 def dot(x, y):
-    return T.dot(x, y)
+    if is_sparse(x):
+        return th_sparse_module.basic.structured_dot(x, y)
+    else:
+        return T.dot(x, y)
 
 
 def batch_dot(x, y, axes=None):
@@ -434,7 +467,10 @@ def normalize_batch_in_training(x, gamma, beta,
 def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
     '''Apply batch normalization on x given mean, var, beta and gamma.
     '''
-    if theano.config.device.startswith('cuda') or theano.config.device.startswith('gpu'):
+    ndim = x.ndim
+    dev = theano.config.device
+    use_cudnn = ndim < 5 and (dev.startswith('cuda') or dev.startswith('gpu'))
+    if use_cudnn:
         try:
             return theano.sandbox.cuda.dnn.dnn_batch_normalization_test(x, gamma, beta, mean, var,
                                                                         'spatial', epsilon)
@@ -447,7 +483,16 @@ def batch_normalization(x, mean, var, beta, gamma, epsilon=0.0001):
 # SHAPE OPERATIONS
 
 def concatenate(tensors, axis=-1):
-    return T.concatenate(tensors, axis=axis)
+    if py_all([is_sparse(x) for x in tensors]):
+        axis = axis % ndim(tensors[0])
+        if axis == 0:
+            return th_sparse_module.basic.vstack(tensors, format='csr')
+        elif axis == 1:
+            return th_sparse_module.basic.hstack(tensors, format='csr')
+        else:
+            raise Exception('Invalid concat axis for sparse matrix: ' + axis)
+    else:
+        return T.concatenate([to_dense(x) for x in tensors], axis=axis)
 
 
 def reshape(x, shape, ndim=None):
@@ -587,7 +632,7 @@ def temporal_padding(x, padding=1):
     return T.set_subtensor(output[:, padding:x.shape[1] + padding, :], x)
 
 
-def spatial_2d_padding(x, padding=(1, 1), dim_ordering='th'):
+def spatial_2d_padding(x, padding=(1, 1), dim_ordering=_IMAGE_DIM_ORDERING):
     '''Pad the 2nd and 3rd dimensions of a 4D tensor
     with "padding[0]" and "padding[1]" (resp.) zeros left and right.
     '''
@@ -618,7 +663,7 @@ def spatial_2d_padding(x, padding=(1, 1), dim_ordering='th'):
     return T.set_subtensor(output[indices], x)
 
 
-def spatial_3d_padding(x, padding=(1, 1, 1), dim_ordering='th'):
+def spatial_3d_padding(x, padding=(1, 1, 1), dim_ordering=_IMAGE_DIM_ORDERING):
     '''Pad the 2nd, 3rd and 4th dimensions of a 5D tensor
     with "padding[0]", "padding[1]" and "padding[2]" (resp.) zeros left and right.
     '''
@@ -1459,11 +1504,26 @@ def in_test_phase(x, alt):
 
 # NN OPERATIONS
 
+def _assert_has_capability(module, func):
+    assert hasattr(module, func), ('It looks like like your version of '
+                                   'Theano is out of date. '
+                                   'Install the latest version with:\n'
+                                   'pip install git+git://github.com/Theano/Theano.git --upgrade --no-deps')
+
+
+def elu(x, alpha=1.0):
+    """ Exponential linear unit
+
+    # Arguments
+        x: Tensor to compute the activation function for.
+        alpha: scalar
+    """
+    _assert_has_capability(T.nnet, 'elu')
+    return T.nnet.elu(x, alpha)
+
+
 def relu(x, alpha=0., max_value=None):
-    assert hasattr(T.nnet, 'relu'), ('It looks like like your version of '
-                                     'Theano is out of date. '
-                                     'Install the latest version with:\n'
-                                     'pip install git+git://github.com/Theano/Theano.git --upgrade --no-deps')
+    _assert_has_capability(T.nnet, 'relu')
     x = T.nnet.relu(x, alpha)
     if max_value is not None:
         x = T.minimum(x, max_value)
@@ -1725,7 +1785,7 @@ def separable_conv2d(x, depthwise_kernel, pointwise_kernel, strides=(1, 1),
 
 
 def conv3d(x, kernel, strides=(1, 1, 1),
-           border_mode='valid', dim_ordering='th',
+           border_mode='valid', dim_ordering=_IMAGE_DIM_ORDERING,
            volume_shape=None, filter_shape=None):
     '''
     Run on cuDNN if available.
@@ -1787,7 +1847,7 @@ def conv3d(x, kernel, strides=(1, 1, 1),
 
 
 def pool2d(x, pool_size, strides=(1, 1), border_mode='valid',
-           dim_ordering='th', pool_mode='max'):
+           dim_ordering=_IMAGE_DIM_ORDERING, pool_mode='max'):
     if border_mode == 'same':
         w_pad = pool_size[0] - 2 if pool_size[0] % 2 == 1 else pool_size[0] - 1
         h_pad = pool_size[1] - 2 if pool_size[1] % 2 == 1 else pool_size[1] - 1
@@ -1830,7 +1890,7 @@ def pool2d(x, pool_size, strides=(1, 1), border_mode='valid',
 
 
 def pool3d(x, pool_size, strides=(1, 1, 1), border_mode='valid',
-           dim_ordering='th', pool_mode='max'):
+           dim_ordering=_IMAGE_DIM_ORDERING, pool_mode='max'):
     if border_mode == 'same':
         # TODO: add implementation for border_mode="same"
         raise Exception('border_mode="same" not supported with Theano.')

@@ -161,6 +161,14 @@ def img_to_array(img, dim_ordering='default'):
 
 
 def load_img(path, grayscale=False, target_size=None):
+    '''Load an image into PIL format.
+
+    # Arguments
+        path: path to image file
+        grayscale: boolean
+        target_size: None (default to original size)
+            or (img_height, img_width)
+    '''
     from PIL import Image
     img = Image.open(path)
     if grayscale:
@@ -382,6 +390,9 @@ class ImageDataGenerator(object):
                 how many augmentation passes to do over the data
             seed: random seed.
         '''
+        if seed is not None:
+            np.random.seed(seed)
+
         X = np.copy(X)
         if augment:
             aX = np.zeros(tuple([rounds * X.shape[0]] + list(X.shape)[1:]))
@@ -423,11 +434,11 @@ class Iterator(object):
         # ensure self.batch_index is 0
         self.reset()
         while 1:
+            if seed is not None:
+                np.random.seed(seed + self.total_batches_seen)
             if self.batch_index == 0:
                 index_array = np.arange(N)
                 if shuffle:
-                    if seed is not None:
-                        np.random.seed(seed + self.total_batches_seen)
                     index_array = np.random.permutation(N)
 
             current_index = (self.batch_index * batch_size) % N
