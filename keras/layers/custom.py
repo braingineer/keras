@@ -367,6 +367,7 @@ class DataLayer(Layer):
 
         if not input_dtype:
             input_dtype = K.floatx()
+        self.input_dtype = input_dtype
 
         self.tensor = K.variable(input_tensor, dtype=input_dtype, name=name)
         self.batch_input_shape = input_tensor.shape

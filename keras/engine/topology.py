@@ -1038,7 +1038,7 @@ def Input(shape=None, batch_shape=None,
           ret_both=False, 
           sparse=False,
           tensor=None):
-   '''`Input()` is used to instantiate a Keras tensor.
+    '''`Input()` is used to instantiate a Keras tensor.
     A Keras tensor is a tensor object from the underlying backend
     (Theano or TensorFlow), which we augment with certain
     attributes that allow us to build a Keras model

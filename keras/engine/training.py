@@ -1389,6 +1389,7 @@ class Model(Container):
                             'you must specify a value for "nb_val_samples".')
 
         out_labels = self.metrics_names
+    
         callback_metrics = out_labels + ['val_' + n for n in out_labels]
 
         # prepare callbacks
@@ -1433,6 +1434,7 @@ class Model(Container):
                                                 pickle_safe=pickle_safe)
 
         callback_model.stop_training = False
+        epoch_logs = {}
         while epoch < nb_epoch:
             callbacks.on_epoch_begin(epoch)
             samples_seen = 0

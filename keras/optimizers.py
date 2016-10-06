@@ -467,8 +467,6 @@ class Adam(Optimizer):
         self.weights = [self.iterations] + ms + vs
 
         for p, g, m, v in zip(params, grads, ms, vs):
-            debugprints.append(F_db(p))
-            debugprints.append(F_db(g))
             m_t = (self.beta_1 * m) + (1. - self.beta_1) * g
             v_t = (self.beta_2 * v) + (1. - self.beta_2) * K.square(g)
             p_t = p - lr_t * m_t / (K.sqrt(v_t) + self.epsilon)

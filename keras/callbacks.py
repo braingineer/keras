@@ -218,15 +218,17 @@ class ProgbarV2(ProgbarLogger):
     def on_batch_end(self, batch, logs={}):
         batch_size = logs.get('size', 0)
         self.seen += batch_size
-
         for k in self.params['metrics']:
             if k in logs:
-                kpart, end = "_".join(k.split("_")[:-1]), k.split("_")[-1]
-                if kpart in self.replacers:
-                    k_ = self.replacers[kpart] + "_" + end
-                else:
-                    k_ = k                    
-                self.log_values.append((k_, logs[k]))
+                self.log_values.append((k, logs[k]))
+        # for k in self.params['metrics']:
+        #     if k in logs:
+        #         kpart, end = "_".join(k.split("_")[:-1]), k.split("_")[-1]
+        #         if kpart in self.replacers:
+        #             k_ = self.replacers[kpart] + "_" + end
+        #         else:
+        #             k_ = k                    
+        #         self.log_values.append((k_, logs[k]))
 
         # skip progbar update for the last batch;
         # will be handled by on_epoch_end
@@ -321,6 +323,8 @@ class ModelCheckpoint(Callback):
         if self.save_best_only:
             current = logs.get(self.monitor)
             if current is None:
+                import pdb
+                pdb.set_trace()
                 warnings.warn('Can save best model only with %s available, '
                               'skipping.' % (self.monitor), RuntimeWarning)
             else:
