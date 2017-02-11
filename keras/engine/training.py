@@ -790,9 +790,12 @@ class Model(Container):
         index_array = np.arange(nb_train_sample)
 
         self.history = cbks.History()
-        callbacks = [cbks.BaseLogger()] + (callbacks or []) + [self.history]
+        callbacks = [cbks.BaseLogger()]
         if verbose:
             callbacks += [cbks.ProgbarLogger()]
+
+        callbacks += (callbacks or []) + [self.history]
+
         callbacks = cbks.CallbackList(callbacks)
         out_labels = out_labels or []
 
@@ -1416,9 +1419,9 @@ class Model(Container):
 
         # prepare callbacks
         self.history = cbks.History()
-        callbacks = [cbks.BaseLogger()] + (callbacks or []) + [self.history]
-        if verbose:
-            callbacks += [cbks.ProgbarLogger()]
+        pl = [cbks.ProgbarLogger()] if verbose else []
+        callbacks = [cbks.BaseLogger()] + pl + (callbacks or []) + [self.history]
+        
         callbacks = cbks.CallbackList(callbacks)
 
         # it's possible to callback a different model than self:

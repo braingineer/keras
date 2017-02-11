@@ -9,9 +9,13 @@ try:
 except ImportError:
     # fall back on pydot if necessary
     import pydot
-if not pydot.find_graphviz():
-    raise RuntimeError('Failed to import pydot. You must install pydot'
-                       ' and graphviz for `pydotprint` to work.')
+try:
+    if not pydot.find_graphviz():
+        raise RuntimeError('Failed to import pydot. You must install pydot'
+                           ' and graphviz for `pydotprint` to work.')
+except AttributeError as ae:
+    import warnings
+    warnings.warn("pydot no longer has find_graphviz")
 
 
 def model_to_dot(model, show_shapes=False, show_layer_names=True):

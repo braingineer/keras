@@ -425,9 +425,9 @@ class RemoteMonitor(Callback):
             requests.post(self.root + self.path,
                           {self.field: json.dumps(send)},
                           headers=self.headers)
-        except:
+        except Exception as e:
             print('Warning: could not reach RemoteMonitor '
-                  'root server at ' + str(self.root))
+                  'root server at {} because {}'.format(str(self.root), e))
 
 
 class LearningRateScheduler(Callback):
@@ -651,7 +651,8 @@ class ReduceLROnPlateau(Callback):
         self.reset()
 
     def on_epoch_end(self, epoch, logs={}):
-        logs['lr'] = K.get_value(self.model.optimizer.lr)
+        logs['lr'] = float(K.get_value(self.model.optimizer.lr))
+        print("Learning is currently: {}".format(logs['lr']))
         current = logs.get(self.monitor)
         if current is None:
             warnings.warn('Learning Rate Plateau Reducing requires %s available!' %

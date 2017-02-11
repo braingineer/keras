@@ -1854,6 +1854,9 @@ class Container(Layer):
             self.input_names.append(layer.name)
         for layer in self.output_layers:
             self.output_names.append(layer.name)
+        print(self.output_names)
+
+        
 
         self.internal_input_shapes = [x._keras_shape for x in self.inputs]
         self.internal_output_shapes = [x._keras_shape for x in self.outputs]
@@ -2677,7 +2680,7 @@ class Container(Layer):
                 else:
                     param_dset[:] = val
 
-    def load_weights(self, filepath, by_name=False):
+    def load_weights(self, filepath, by_name=False, **kwargs):
         '''Loads all layer weights from a HDF5 save file.
 
         If `by_name` is False (default) weights are loaded
@@ -2697,14 +2700,14 @@ class Container(Layer):
         if 'layer_names' not in f.attrs and 'model_weights' in f:
             f = f['model_weights']
         if by_name:
-            self.load_weights_from_hdf5_group_by_name(f)
+            self.load_weights_from_hdf5_group_by_name(f, **kwargs)
         else:
-            self.load_weights_from_hdf5_group(f)
+            self.load_weights_from_hdf5_group(f, **kwargs)
 
         if hasattr(f, 'close'):
             f.close()
 
-    def load_weights_from_hdf5_group(self, f):
+    def load_weights_from_hdf5_group(self, f, **kwargs):
         '''Weight loading is based on layer order in a list
         (matching model.flattened_layers for Sequential models,
         and model.layers for Model class instances), not
@@ -2787,11 +2790,12 @@ class Container(Layer):
                 weight_value_tuples += zip(symbolic_weights, weight_values)
             K.batch_set_value(weight_value_tuples)
 
-    def load_weights_from_hdf5_group_by_name(self, f):
+    def load_weights_from_hdf5_group_by_name(self, f, **kwargs):
         ''' Name-based weight loading
         (instead of topological weight loading).
         Layers that have no matching name are skipped.
         '''
+        print("Loading weights by name")
         if hasattr(self, 'flattened_layers'):
             # Support for legacy Sequential/Merge behavior.
             flattened_layers = self.flattened_layers
@@ -2805,11 +2809,16 @@ class Container(Layer):
         else:
             # New file format.
             layer_names = [n.decode('utf8') for n in f.attrs['layer_names']]
-
+            
+            # if there is a list of target names, use that to restrict
+            target_layers = set(kwargs.pop('target_layers', []))
+            verbose = kwargs.pop("verbose", False)
+            
             # Reverse index of layer name to list of layers with name.
             index = {}
             for layer in flattened_layers:
-                if layer.name:
+                if layer.name and (len(target_layers)==0 or layer.name in target_layers):
+                    print("Confirmed {} as weight loading target".format(layer.name))
                     index.setdefault(layer.name, []).append(layer)
 
             # We batch weight value assignments in a single backend call
@@ -2821,6 +2830,7 @@ class Container(Layer):
                 weight_values = [g[weight_name] for weight_name in weight_names]
 
                 for layer in index.get(name, []):
+                    print("{} loading weights".format(layer.name))
                     symbolic_weights = layer.weights
                     if len(weight_values) != len(symbolic_weights):
                         raise ValueError('Layer #' + str(k) +
