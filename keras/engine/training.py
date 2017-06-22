@@ -1757,17 +1757,21 @@ class Model(Container):
         })
         callbacks.on_train_begin()
 
-        if do_validation and not val_gen:
-            if len(validation_data) == 2:
-                val_x, val_y = validation_data
+        if do_validation:# and not val_gen:
+            if val_gen:
+                cbk_valdata = next(validation_data)
+            else:
+                cbk_valdata = validation_data
+            if len(cbk_valdata) == 2:
+                val_x, val_y = cbk_valdata
                 val_sample_weight = None
-            elif len(validation_data) == 3:
-                val_x, val_y, val_sample_weight = validation_data
+            elif len(cbk_valdata) == 3:
+                val_x, val_y, val_sample_weight = cbk_valdata
             else:
                 raise ValueError('`validation_data` should be a tuple '
                                  '`(val_x, val_y, val_sample_weight)` '
                                  'or `(val_x, val_y)`. Found: ' +
-                                 str(validation_data))
+                                 str(cbk_valdata))
             val_x, val_y, val_sample_weights = self._standardize_user_data(
                 val_x, val_y, val_sample_weight)
             val_data = val_x + val_y + val_sample_weights

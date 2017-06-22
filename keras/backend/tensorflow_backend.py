@@ -1740,13 +1740,23 @@ def permute_dimensions(x, pattern):
     """Permutes axes in a tensor.
 
     # Arguments
-        x: Tensor or variable.
-        pattern: A tuple of
-            dimension indices, e.g. `(0, 2, 1)`.
+        pattern: should be a tuple of
+            dimension indices, e.g. (0, 2, 1).
 
     # Returns
         A tensor.
     """
+    if 'x' in pattern:
+        new_pattern = []
+        offset = 0
+        for i, val in enumerate(pattern):
+            if val == 'x':
+                x = tf.expand_dims(x, i)
+                new_pattern.append(i)
+                offset += 1
+            else:
+                new_pattern.append(val+offset)
+        pattern = tuple(new_pattern)
     return tf.transpose(x, perm=pattern)
 
 

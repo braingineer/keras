@@ -3069,6 +3069,7 @@ def load_weights_from_hdf5_group_by_name(f, layers):
     # We batch weight value assignments in a single backend call
     # which provides a speedup in TensorFlow.
     weight_value_tuples = []
+    layers_that_loaded_weights = set()
     for k, name in enumerate(layer_names):
         g = f[name]
         weight_names = [n.decode('utf8') for n in g.attrs['weight_names']]
@@ -3093,4 +3094,10 @@ def load_weights_from_hdf5_group_by_name(f, layers):
             for i in range(len(weight_values)):
                 weight_value_tuples.append((symbolic_weights[i],
                                             weight_values[i]))
+                layers_that_loaded_weights.add(name)
+                                
     K.batch_set_value(weight_value_tuples)
+    
+    print("Loaded_weights: " + "; ".join(layers_that_loaded_weights))
+    print("Weights in file that did not load to model: " + "; ".join(set(layer_names) - layers_that_loaded_weights))
+
